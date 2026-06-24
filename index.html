@@ -5,8 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
 <title>🤖 우리집 매니졀</title>
 
+<!-- 모바일 터치 드래그 앤 드롭을 위한 SortableJS 라이브러리 -->
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
 
+<!-- Firebase v10 CDN -->
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
   import {
@@ -32,7 +34,7 @@
   const ZONES_COL = "zones";
 
   /* ====================================================
-     ✨ 커스텀 디자인 및 설정 변수 (여기서 쉽게 수정하세요!)
+     ✨ 커스텀 디자인 및 설정 변수
   ==================================================== */
   const KING_PREFIX = "🫡👑✨"; // 활동왕 이름 앞쪽 이모지
   const KING_SUFFIX = "✨👑🫡"; // 활동왕 이름 뒤쪽 이모지
@@ -124,7 +126,7 @@
       myTodayCountEl.innerText = `(0)`;
     }
 
-    // 2. 👑 초화려한 랭킹 배너 업데이트 (수정하기 매우 편리하게 일원화)
+    // 2. 👑 초화려한 랭킹 배너 업데이트 (개수 노출 없음)
     if(maxCount > 0) {
       kingBanner.innerHTML = `${KING_PREFIX} 오늘의 활동왕: <strong>${kingEmoji} ${kingRole}</strong> ${KING_SUFFIX}`;
       kingBanner.classList.remove("hidden");
@@ -492,6 +494,10 @@
      🎨 CSS 스타일시트 구역
   ==================================================== */
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  
+  /* 🌟 이 한 줄이 없어서 모달창이 안 닫혔던 겁니다! 절대 지우면 안 됨 🌟 */
+  .hidden { display: none !important; }
+
   :root {
     --bg: #F5F7F8; --card: #FFFFFF; --text: #2C3E50; --sub: #7F8C8D;
     --green: #2ECC71; --blue: #3498DB; --red: #E74C3C; --yellow: #F1C40F;
@@ -520,7 +526,6 @@
     box-shadow: 0 4px 15px rgba(255, 140, 0, 0.45); 
     animation: auroraGlow 6s ease infinite, wiggleDance 1.2s ease-in-out infinite alternate;
   }
-  #king-banner.hidden { display: none; }
   @keyframes auroraGlow { 0% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } 100% { background-position: 0% 50%; } }
   @keyframes wiggleDance { 0% { transform: rotate(-1.5deg) scale(0.98); } 100% { transform: rotate(1.5deg) scale(1.02); } }
 
@@ -571,7 +576,6 @@
   .sync-time { text-align: center; font-size: 0.75rem; color: #BDC3C7; margin-top: 15px; margin-bottom: 4px; font-weight: 600; }
   .farm-panel { text-align: center; font-size: 1.7rem; padding: 10px; margin: 10px 16px 35px; }
   .farm-panel b { display: inline-block; margin: 0 3px; animation: eggPop 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; }
-  .farm-panel.hidden { display: none; }
   @keyframes eggPop { 0% { transform: scale(0.6); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
   .empty-state { text-align: center; padding: 50px 20px; color: var(--sub); }
   .empty-icon { font-size: 3rem; display: block; margin-bottom: 12px; }
@@ -587,16 +591,17 @@
   .form-group label { font-size: .8rem; font-weight: 600; color: var(--sub); }
   .form-group input, .form-group select { padding: 10px 12px; border-radius: 8px; border: 1px solid #D5D8DC; font-size: .95rem; outline: none; background: #fff; }
   .btn-row { display: flex; gap: 8px; margin-top: 16px; }
-  .btn-cancel { flex: 1; padding: 12px; border-radius: 10px; border: none; background: #EAECEE; font-size: .95rem; font-weight:600; color: var(--text); }
-  .btn-submit { flex: 2; padding: 12px; border-radius: 10px; border: none; background: var(--blue); color: #fff; font-size: .95rem; font-weight: 700; }
-  .btn-delete-link { width: 100%; text-align: center; margin-top: 16px; font-size: .85rem; color: var(--red); background: none; border: none; text-decoration: underline; }
+  .btn-cancel { flex: 1; padding: 12px; border-radius: 10px; border: none; background: #EAECEE; font-size: .95rem; font-weight:600; color: var(--text); cursor: pointer; }
+  .btn-submit { flex: 2; padding: 12px; border-radius: 10px; border: none; background: var(--blue); color: #fff; font-size: .95rem; font-weight: 700; cursor: pointer; }
+  .btn-delete-link { width: 100%; text-align: center; margin-top: 16px; font-size: .85rem; color: var(--red); background: none; border: none; text-decoration: underline; cursor: pointer; }
 
-  .confetti-piece { position: absolute; bottom: -20px; animation: rise 1.4s ease-out forwards; }
+  .confetti-piece { position: absolute; bottom: -20px; animation: rise 1.4s ease-out forwards; pointer-events: none; }
   @keyframes rise { 0% { transform: translateY(0) rotate(0deg); opacity: 1; } 100% { transform: translateY(-80vh) rotate(360deg); opacity: 0; } }
 </style>
 </head>
 <body>
 
+<!-- 서비스 진입용 사용자 설정 모달 -->
 <div class="modal-overlay hidden" id="member-modal">
   <div class="modal-sheet">
     <p class="modal-title">👋 내 역할과 이모지 선택</p>
@@ -612,6 +617,7 @@
   </div>
 </div>
 
+<!-- 할 일 추가/수정용 모달 -->
 <div class="modal-overlay hidden" id="add-modal">
   <div class="modal-sheet">
     <p class="modal-title" id="modal-title">항목 추가</p>
@@ -647,6 +653,7 @@
   </div>
 </div>
 
+<!-- 앱 상단 헤더 구역 -->
 <header>
   <div class="header-row">
     <span class="header-title">🤖 우리집 매니졀</span>
@@ -658,13 +665,17 @@
   </div>
 </header>
 
+<!-- 실시간 무빙 오로라 랭킹 배너 -->
 <div id="king-banner" class="hidden"></div>
 
+<!-- 메인 할 일 카드 리스트 출력구 -->
 <div id="zones"></div>
 
+<!-- 동기화 정보 및 서프라이즈 농장 -->
 <div id="last-sync-time" class="sync-time"></div>
 <div id="farm-panel" class="farm-panel hidden"></div>
 
+<!-- 신규 항목 추가 FAB 및 효과 레이어 -->
 <button id="fab" title="항목 추가">+</button>
 <div id="confetti-layer"></div>
 
