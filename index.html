@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
 <title>🏠 우리 집 청소 매니저</title>
 
+<!-- Firebase v10 CDN -->
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
   import {
@@ -155,8 +156,15 @@
         }
       }
 
-      const reactions = zone.reactions || { "👍":0, "❤️":0, "👏":0 };
       const assigneeLabel = zone.assignee && zone.assignee !== '공통' ? `<span class="assignee-badge">${zone.assignee} 당번</span>` : '';
+
+      // 코멘트 처리 (오브젝트 형태)
+      const commentsObj = (typeof zone.comments === 'object' && zone.comments !== null) ? zone.comments : {};
+      const commentsHtml = Object.entries(commentsObj)
+        .map(([role, data]) => `<div class="comment-line"><span class="comment-author">${data.emoji || ''} ${role}:</span> <span class="comment-text">${data.text}</span></div>`)
+        .join("");
+      
+      const myCommentText = commentsObj[currentRole] ? commentsObj[currentRole].text : '';
 
       const card = document.createElement("div");
       card.className = `zone-card ${overdue ? "overdue" : ""} ${days===0 ? "cleared" : ""}`;
@@ -183,8 +191,12 @@
           </div>
         </div>
         
-        <div class="zone-comment">
-          <input type="text" class="comment-input" data-id="${zone.id}" value="${zone.comment || ''}" placeholder="요청사항이나 코멘트를 남겨보세요..." />
+        <div class="zone-comments">
+          ${commentsHtml ? `<div class="comments-list">${commentsHtml}</div>` : ""}
+          <div class="comment-input-wrap">
+            <span class="my-comment-label">나의 코멘트</span>
+            <input type="text" class="comment-input" data-id="${zone.id}" value="${myCommentText}" placeholder="요청사항이나 메모를 남겨보세요..." />
+          </div>
         </div>
       `;
 
@@ -245,7 +257,20 @@
   }
 
   async function updateComment(id, text) {
-    await updateDoc(doc(db, ZONES_COL, id), { comment: text });
+    if (!currentRole) { alert("먼저 멤버를 설정해 주세요!"); return; }
+    const zone = zonesData.find(z => z.id === id);
+    if (!zone) return;
+    
+    // 기존 코멘트 객체 가져오기 (없으면 빈 객체)
+    const comments = (typeof zone.comments === 'object' && zone.comments !== null) ? { ...zone.comments } : {};
+    
+    if (text.trim() === "") {
+      delete comments[currentRole]; // 빈칸으로 수정하면 내 코멘트 삭제
+    } else {
+      comments[currentRole] = { emoji: currentEmoji, text: text.trim() }; // 내 역할에 코멘트 저장/덮어쓰기
+    }
+    
+    await updateDoc(doc(db, ZONES_COL, id), { comments });
   }
 
   async function deleteZone(id) {
@@ -310,7 +335,7 @@
     } else {
       await addDoc(collection(db, ZONES_COL), {
         name, category, emoji, cycle, assignee,
-        lastCleaned: null, lastWho: "", history: [], comment: "",
+        lastCleaned: null, lastWho: "", history: [], comments: {},
         createdAt: serverTimestamp(),
       });
     }
@@ -561,18 +586,56 @@
     opacity: 0.5;
   }
 
-  .zone-comment { margin-top: 10px; }
-  .comment-input {
-    width: 100%;
+  /* 코멘트 영역 스타일 */
+  .zone-comments {
+    margin-top: 12px;
     background: #F8F9F9;
-    border: 1px solid #E5E7E9;
+    border-radius: 8px;
+    padding: 10px;
+    border: 1px solid #EAECEE;
+  }
+  .comments-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 10px;
+  }
+  .comment-line {
+    font-size: .8rem;
+    color: var(--text);
+    background: #fff;
+    padding: 8px 10px;
+    border-radius: 6px;
+    border: 1px solid #EAECEE;
+    line-height: 1.3;
+  }
+  .comment-author {
+    font-weight: 700;
+    color: var(--sub);
+    margin-right: 4px;
+  }
+  .comment-input-wrap {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .my-comment-label {
+    font-size: .75rem;
+    font-weight: 700;
+    color: var(--blue);
+    white-space: nowrap;
+  }
+  .comment-input {
+    flex: 1;
+    background: #fff;
+    border: 1px solid #D5D8DC;
     border-radius: 6px;
     padding: 8px 10px;
     font-size: .8rem;
-    color: var(--text);
     outline: none;
+    color: var(--text);
   }
-  .comment-input:focus { border-color: var(--blue); background: #fff; }
+  .comment-input:focus { border-color: var(--blue); }
 
   /* ── FAB ──────────────────────────────────────── */
   #fab {
@@ -638,6 +701,7 @@
 </head>
 <body>
 
+<!-- 역할 설정 모달 -->
 <div class="modal-overlay hidden" id="member-modal">
   <div class="modal-sheet">
     <p class="modal-title">👋 내 역할과 이모지 선택</p>
@@ -653,6 +717,7 @@
   </div>
 </div>
 
+<!-- 구역 추가/수정 모달 -->
 <div class="modal-overlay hidden" id="add-modal">
   <div class="modal-sheet">
     <p class="modal-title" id="modal-title">구역 추가</p>
@@ -688,6 +753,7 @@
   </div>
 </div>
 
+<!-- 헤더 -->
 <header>
   <div class="header-row">
     <span class="header-title">🏠 우리 집 청소 매니저</span>
@@ -698,15 +764,19 @@
   </div>
 </header>
 
+<!-- 랜덤 미션 -->
 <div class="roulette-wrap">
   <button id="roulette-btn">🎲 오늘 어디 치울까? (랜덤 뽑기)</button>
   <div id="roulette-card" class="hidden"></div>
 </div>
 
+<!-- 구역 목록 -->
 <div id="zones"></div>
 
+<!-- FAB -->
 <button id="fab" title="구역 추가">+</button>
 
+<!-- 이모지 폭죽 레이어 -->
 <div id="confetti-layer"></div>
 
 </body>
