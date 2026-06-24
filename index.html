@@ -36,9 +36,8 @@
   const ROLES = ["아빠", "엄마", "미네"];
   const PENALTY_EMOJIS = ["🙄","😛","😜","🤪","😶","🤨","🤔","🤫","🫣","🫩","😵‍💫","🤢","🤮","😠","😡","🤬","👿","☠️"];
   
-  // 달 위상 (차오를 때 vs 저물 때)
-  const WAXING_MOONS = ["🌑", "🌒", "🌓", "🌔", "🌝"]; // 수동 진행용 (충전)
-  const WANING_MOONS = ["🌝", "🌖", "🌗", "🌘", "🌑"]; // 시간 경과용 (방전)
+  // 과학적인 8단계 달의 위상 순환
+  const ALL_MOONS = ["🌑", "🌒", "🌓", "🌔", "🌝", "🌖", "🌗", "🌘"];
 
   /* ── 상태 ─────────────────────────────────────── */
   let currentRole  = localStorage.getItem("hm_role") || null;
@@ -209,31 +208,34 @@
       const days = daysSince(zone.lastCleaned);
       const cycle = zone.cycle || 3;
       const overdue = days !== null && days > cycle;
-      const progress = zone.progress || 0; 
+      const progress = zone.progress; // null 이면 자동 방전 모드
 
+      let displayMoon = "🌑";
       let statusEmoji = "";
       let dayLabel = "기록 없음";
 
       /* 🌕 달 위상 결정 로직 */
-      let displayMoon = "🌑";
-      
-      if (progress > 0) {
-        // 수동으로 진행 중일 때는 차오르는 달
-        displayMoon = WAXING_MOONS[progress];
+      if (progress !== null && progress !== undefined) {
+        // 수동으로 누른 기록이 있으면 그 위상 유지
+        displayMoon = ALL_MOONS[progress];
       } else if (days !== null && days < cycle) {
-        // 완료 후 주기가 다가올 때 서서히 저무는 달 (자동 방전)
+        // 완료 후 시간이 흐르며 자동으로 저무는 달 (방전)
         let ratio = days / cycle;
-        let wIndex = Math.floor(ratio * 4); 
-        displayMoon = WANING_MOONS[wIndex]; // days=0 이면 🌝, 커질수록 🌑에 가까워짐
+        let wIndex = Math.floor(ratio * 4); // 0,1,2,3
+        const waningArr = ["🌝", "🌖", "🌗", "🌘"];
+        displayMoon = waningArr[wIndex];
       } else {
-        // 아예 안 했거나 주기가 넘었으면 시커먼 달
+        // 완전 방전 (초기화)
         displayMoon = "🌑";
       }
 
+      /* 상태(반짝이/페널티) 결정 로직 */
       if (days === null) {
         statusEmoji = ""; 
       } else if (days === 0) {
         dayLabel = "오늘 완료 😎";
+        // 🌟 완료 시 페널티 자리에 반짝이는 이모지 부착!
+        statusEmoji = `<span class="done-sticker">✨</span>`;
       } else {
         dayLabel = `D+${days}`;
         if (overdue) {
@@ -241,7 +243,7 @@
           pIndex = Math.max(0, Math.min(pIndex, PENALTY_EMOJIS.length - 1));
           statusEmoji = PENALTY_EMOJIS[pIndex];
         } else {
-          statusEmoji = "✨";
+          statusEmoji = "";
         }
       }
 
@@ -254,9 +256,6 @@
       const myCommentText = commentsObj[currentRole] ? commentsObj[currentRole].text : '';
       const hasComments = Object.keys(commentsObj).length > 0;
 
-      // 🌟 완료된 이름 옆에 반짝이는(✨) 스티커 부착
-      const nameSticker = days === 0 ? `<span class="done-sticker">✨</span>` : "";
-
       const card = document.createElement("div");
       card.className = `zone-card ${overdue ? "overdue" : ""} ${days===0 ? "cleared" : ""}`;
       card.dataset.id = zone.id; 
@@ -266,7 +265,7 @@
           <div class="zone-emoji">${zone.emoji || "📝"}${statusEmoji}</div>
           <div class="zone-info">
             <div class="zone-name-row">
-              <strong class="zone-name">${zone.name} ${nameSticker}</strong>
+              <strong class="zone-name">${zone.name}</strong>
               ${assigneeLabel}
             </div>
             <div class="zone-meta">
@@ -277,10 +276,7 @@
           </div>
           
           <div class="zone-actions">
-            ${ days === 0 
-              ? `<button class="action-btn progress-btn undo-mode" data-id="${zone.id}" title="취소">${displayMoon}</button>` 
-              : `<button class="action-btn progress-btn" data-id="${zone.id}" data-prog="${progress}" data-emoji="${zone.emoji||"✨"}" title="진행상황">${displayMoon}</button>`
-            }
+            <button class="action-btn progress-btn" data-id="${zone.id}" data-moon="${displayMoon}" data-emoji="${zone.emoji||"✨"}" title="진행상황">${displayMoon}</button>
             <button class="action-btn memo-btn ${hasComments ? 'has-memo' : ''}" data-id="${zone.id}" title="메모">💬</button>
             <button class="action-btn edit-btn" data-id="${zone.id}" title="수정">⚙️</button>
           </div>
@@ -329,7 +325,7 @@
     }
   }
 
-  /* ── 🌟 통합 이벤트 위임 (버튼 터치 씹힘 방지) ── */
+  /* ── 🌟 통합 이벤트 위임 (달 위상 순환 완벽 처리) ── */
   zonesEl.addEventListener("click", async (e) => {
     const target = e.target;
 
@@ -338,21 +334,21 @@
     if (progBtn) {
       e.stopPropagation();
       const id = progBtn.dataset.id;
+      const currentDisplayMoon = progBtn.dataset.moon; 
+      const currentIndex = ALL_MOONS.indexOf(currentDisplayMoon);
+      const nextIndex = (currentIndex + 1) % 8; // 무조건 다음 위상으로 넘어감!
 
-      // 만약 이미 완료된(🌝) 상태라면 클릭 시 취소(Undo) 처리
-      if (progBtn.classList.contains("undo-mode")) {
-        undoClear(id);
-        return;
-      }
-
-      const currentProg = parseInt(progBtn.dataset.prog) || 0;
       vibrateShort();
       
-      // 0~2단계면 차오르고, 3단계(🌔)에서 누르면 완료(🌝) 처리!
-      if (currentProg < 3) {
-        await updateDoc(doc(db, ZONES_COL, id), { progress: currentProg + 1 });
-      } else {
+      if (nextIndex === 4) {
+        // 🌔(3) -> 🌝(4): 달이 꽉 차면 완료!
         clearZone(id, progBtn.dataset.emoji);
+      } else if (currentIndex === 4) {
+        // 🌝(4) -> 🌖(5): 보름달에서 누르면 경고창 없이 취소되고 다음 위상으로!
+        undoClearSilent(id, nextIndex);
+      } else {
+        // 그 외엔 과학적으로 위상만 변경
+        updateDoc(doc(db, ZONES_COL, id), { progress: nextIndex });
       }
       return;
     }
@@ -397,18 +393,17 @@
       lastCleaned: Timestamp.fromMillis(now),
       lastWho:     `${currentEmoji}${currentRole}`,
       history:     arrayUnion(now),
-      progress:    0 // 다음을 위해 수동 진행도만 0으로 초기화 (화면엔 날짜 계산으로 🌝가 뜸)
+      progress:    null // 수동 진행을 초기화하면, 화면엔 '오늘완료'에 맞춰 🌝가 자동으로 뜸
     });
     launchConfetti("🌝");
   }
 
-  async function undoClear(id) {
-    if (!confirm("완료 기록을 취소하시겠습니까? (다시 🌔 상태로 돌아갑니다)")) return;
+  async function undoClearSilent(id, nextProgress) {
     const zone = zonesData.find(z => z.id === id);
     if (!zone) return;
     
     let newHistory = [...(zone.history || [])];
-    newHistory.pop();
+    newHistory.pop(); // 최근 완료 기록 하나 제거
     
     let newLastCleaned = null;
     let newLastWho = "";
@@ -421,7 +416,7 @@
       lastCleaned: newLastCleaned,
       history: newHistory,
       lastWho: newLastWho,
-      progress: 3 // 실수로 취소했을 때를 위해 다시 🌔 단계로 복귀
+      progress: nextProgress // 🌝에서 눌렀으니 🌖(5) 상태로 넘어감
     });
   }
 
@@ -503,7 +498,7 @@
       await addDoc(collection(db, ZONES_COL), {
         name, category, emoji, cycle, assignee,
         order: Date.now(),
-        lastCleaned: null, lastWho: "", history: [], comments: {}, progress: 0,
+        lastCleaned: null, lastWho: "", history: [], comments: {}, progress: null,
         createdAt: serverTimestamp(),
       });
     }
@@ -677,17 +672,12 @@
   .sortable-ghost { opacity: 0.4; border: 2px dashed var(--blue); background: #EBF5FB; }
 
   .zone-main { display: flex; align-items: center; gap: 10px; }
-  .zone-emoji { font-size: 1.6rem; flex-shrink: 0; min-width: 32px; text-align:center;}
-
-  .zone-info { flex: 1; display: flex; flex-direction: column; gap: 4px; }
-  .zone-name-row { display: flex; align-items: center; gap: 6px; }
-  .zone-name { font-size: .95rem; font-weight: 700; }
   
-  /* 🌟 이름 옆에 붙는 반짝이는 스티커 스타일 */
+  /* 🌟 이모지 및 반짝이 위치 */
+  .zone-emoji { font-size: 1.6rem; flex-shrink: 0; min-width: 32px; text-align:center;}
   .done-sticker { 
-    font-size: 1.1rem; 
     display: inline-block; 
-    margin-left: 2px;
+    margin-left: 4px;
     animation: sparkleAnim 1s ease-in-out infinite alternate; 
   }
   
@@ -695,6 +685,10 @@
     0% { transform: scale(0.85); opacity: 0.6; filter: drop-shadow(0 0 2px rgba(255, 215, 0, 0.4)); }
     100% { transform: scale(1.2); opacity: 1; filter: drop-shadow(0 0 8px rgba(255, 215, 0, 1)); }
   }
+
+  .zone-info { flex: 1; display: flex; flex-direction: column; gap: 4px; }
+  .zone-name-row { display: flex; align-items: center; gap: 6px; }
+  .zone-name { font-size: .95rem; font-weight: 700; }
 
   .assignee-badge {
     font-size: .65rem; background: var(--blue); color: #fff;
@@ -720,7 +714,6 @@
   .action-btn:active { transform: scale(0.85); background: #EAECEE; }
   
   .progress-btn { background: #fff; font-size: 1.3rem; } 
-  .undo-mode { background: #FDFEFE; } 
   
   /* 코멘트 알림 뱃지 */
   .memo-btn { position: relative; }
