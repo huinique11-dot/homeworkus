@@ -5,10 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
 <title>🤖 우리집 매니졀</title>
 
-<!-- 모바일 터치 드래그 앤 드롭을 위한 SortableJS 라이브러리 -->
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
 
-<!-- Firebase v10 CDN -->
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
   import {
@@ -33,19 +31,24 @@
   const db  = getFirestore(app);
   const ZONES_COL = "zones";
 
-  /* ── 역할 목록 및 이모지 배열 ──────────────────── */
+  /* ====================================================
+     ✨ 커스텀 디자인 및 설정 변수 (여기서 쉽게 수정하세요!)
+  ==================================================== */
+  const KING_PREFIX = "🫡👑✨"; // 활동왕 이름 앞쪽 이모지
+  const KING_SUFFIX = "✨👑🫡"; // 활동왕 이름 뒤쪽 이모지
+  
   const ROLES = ["아빠", "엄마", "미네"];
-  const PENALTY_EMOJIS = ["🙄","😛","😜","🤪","😶","🤨","🤔","🤫","🫣","🫩","😵‍💫","🤢","🤮","😠","😡","🤬","👿","☠️"];
   const ALL_MOONS = ["🌑", "🌒", "🌓", "🌔", "🌝", "🌖", "🌗", "🌘"];
+  const PENALTY_EMOJIS = ["🙄","😛","😜","🤪","😶","🤨","🤔","🤫","🫣","🫩","😵‍💫","🤢","🤮","😠","😡","🤬","👿","☠️"];
 
-  /* ── 상태 ─────────────────────────────────────── */
+  /* ── 앱 내부 상태 관리 ─────────────────────────── */
   let currentRole  = localStorage.getItem("hm_role") || null;
   let currentEmoji = localStorage.getItem("hm_emoji") || null;
   let collapsedGroups = JSON.parse(localStorage.getItem("hm_collapsed") || "{}"); 
   let openCommentIds = new Set();
   let zonesData    = [];
 
-  /* ── DOM 참조 ─────────────────────────────────── */
+  /* ── DOM 엘리먼트 참조 ─────────────────────────── */
   const memberModal   = document.getElementById("member-modal");
   const roleSelect    = document.getElementById("inp-role");
   const profileEmoji  = document.getElementById("inp-profile-emoji");
@@ -62,7 +65,9 @@
   const syncTimeEl    = document.getElementById("last-sync-time");
   const farmPanelEl   = document.getElementById("farm-panel");
 
-  /* ── 멤버 설정 ──────────────────────────── */
+  /* ====================================================
+     👤 사용자 프로필 / 역할 관리 함수
+  ==================================================== */
   function renderMemberModal() {
     roleSelect.innerHTML = ROLES.map(r => `<option value="${r}" ${r===currentRole?'selected':''}>${r}</option>`).join("");
     profileEmoji.value = currentEmoji || "😀";
@@ -87,29 +92,9 @@
 
   document.getElementById("change-member-btn").onclick = renderMemberModal;
 
-  /* ── Firestore 실시간 구독 ─────────────────────── */
-  onSnapshot(collection(db, ZONES_COL), snap => {
-    zonesData = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    zonesData.sort((a, b) => (a.order || 0) - (b.order || 0));
-    renderZones();
-    
-    const now = new Date();
-    const timeStr = now.toLocaleDateString('ko-KR') + ' ' + now.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    syncTimeEl.innerText = `🔄 최근 동기화: ${timeStr}`;
-  });
-
-  /* ── 경과일 계산 ──────────────────────────────── */
-  function daysSince(ts) {
-    if (!ts) return null;
-    const ms = ts.toDate ? ts.toDate().getTime() : (typeof ts === 'number' ? ts : ts.seconds * 1000);
-    const today = new Date();
-    today.setHours(0,0,0,0);
-    const target = new Date(ms);
-    target.setHours(0,0,0,0);
-    return Math.floor((today - target) / 86400000);
-  }
-
-  /* ── 오늘의 활동왕 & 스탯 계산 ── */
+  /* ====================================================
+     📊 데이터 계산 및 오늘의 활동왕 배너 처리
+  ==================================================== */
   function updateKingAndStats() {
     let counts = {};
     ROLES.forEach(r => counts[r] = 0);
@@ -132,26 +117,39 @@
       }
     });
 
-    // 1. 로그인한 본인한테만 이름 옆에 개수 노출
+    // 1. 내 오늘 미션 개수 실시간 반영 (블라인드 비밀 유지 🤫)
     if (currentRole && counts[currentRole] > 0) {
       myTodayCountEl.innerText = `(${counts[currentRole]})`;
     } else {
       myTodayCountEl.innerText = `(0)`;
     }
 
-    // 2. 🌟 활동왕 배너에서 개수 표기를 철저하게 완전 삭제!
+    // 2. 👑 초화려한 랭킹 배너 업데이트 (수정하기 매우 편리하게 일원화)
     if(maxCount > 0) {
-      kingBanner.innerHTML = `🏆 오늘의 활동왕: <strong>${kingEmoji} ${kingRole}</strong>`;
+      kingBanner.innerHTML = `${KING_PREFIX} 오늘의 활동왕: <strong>${kingEmoji} ${kingRole}</strong> ${KING_SUFFIX}`;
       kingBanner.classList.remove("hidden");
     } else {
       kingBanner.classList.add("hidden");
     }
 
-    // 한국 시간 밤 9시 기준 정산 로직 실행
+    // 밤 9시 정산 로직 가동
     check9PMReward(kingRole, maxCount);
   }
 
-  /* ── 🥚 한국 시간 밤 9시 기준 서프라이즈 시스템 ── */
+  /* ── 날짜 경과일 계산 ── */
+  function daysSince(ts) {
+    if (!ts) return null;
+    const ms = ts.toDate ? ts.toDate().getTime() : (typeof ts === 'number' ? ts : ts.seconds * 1000);
+    const today = new Date();
+    today.setHours(0,0,0,0);
+    const target = new Date(ms);
+    target.setHours(0,0,0,0);
+    return Math.floor((today - target) / 86400000);
+  }
+
+  /* ====================================================
+     🥚 서프라이즈 농장 시스템 (밤 9시 정산 로직)
+  ==================================================== */
   function check9PMReward(currentKing, maxCount) {
     const now = new Date();
     const kstOffset = 9 * 60 * 60 * 1000;
@@ -162,7 +160,6 @@
       periodDate.setDate(periodDate.getDate() - 1);
     }
     const periodId = periodDate.toLocaleDateString('ko-KR');
-
     const lastRewardedPeriod = localStorage.getItem("hm_last_reward_period");
 
     if (lastRewardedPeriod && lastRewardedPeriod !== periodId) {
@@ -189,20 +186,8 @@
     let chicks = parseInt(localStorage.getItem("hm_farm_chicks") || "0");
     let chickens = parseInt(localStorage.getItem("hm_farm_chickens") || "0");
 
-    if (eggs >= 7) {
-      const newChicks = Math.floor(eggs / 7);
-      chicks += newChicks;
-      eggs = eggs % 7;
-      localStorage.setItem("hm_farm_chicks", chicks);
-      localStorage.setItem("hm_farm_eggs", eggs);
-    }
-    if (chicks >= 7) {
-      const newChickenens = Math.floor(chicks / 7);
-      chickens += newChickenens;
-      chicks = chicks % 7;
-      localStorage.setItem("hm_farm_chickens", chickens);
-      localStorage.setItem("hm_farm_chicks", chicks);
-    }
+    if (eggs >= 7) { chicks += Math.floor(eggs / 7); eggs = eggs % 7; localStorage.setItem("hm_farm_chicks", chicks); localStorage.setItem("hm_farm_eggs", eggs); }
+    if (chicks >= 7) { chickens += Math.floor(chicks / 7); chicks = chicks % 7; localStorage.setItem("hm_farm_chickens", chickens); localStorage.setItem("hm_farm_chicks", chicks); }
 
     let emojiStream = "";
     for(let i=0; i<chickens; i++) emojiStream += "<b>🐓</b>";
@@ -217,7 +202,9 @@
     }
   }
 
-  /* ── 리스트 렌더링 ─────────────────────────── */
+  /* ====================================================
+     📋 할 일 리스트 UI 렌더링 및 드래그 제어
+  ==================================================== */
   function renderZones() {
     zonesEl.innerHTML = "";
     updateKingAndStats(); 
@@ -231,9 +218,7 @@
     const otherZones = zonesData.filter(z => z.assignee !== currentRole);
 
     let renderGroups = [];
-    if (myZones.length > 0) {
-      renderGroups.push({ title: "📌 내 당번 항목", zones: myZones });
-    }
+    if (myZones.length > 0) renderGroups.push({ title: "📌 내 당번 항목", zones: myZones });
 
     const categories = [...new Set(otherZones.map(z => z.category || "기타"))];
     categories.forEach(cat => {
@@ -267,7 +252,6 @@
 
   function renderGroupUI(title, zones) {
     const isCollapsed = collapsedGroups[title] || false;
-    
     const groupEl = document.createElement("div");
     groupEl.className = "zone-group";
     
@@ -295,38 +279,24 @@
       let dayLabel = "기록 없음";
 
       if (moonIndex === 4 && days !== null && days > 0) {
-        if (days >= cycle) {
-          moonIndex = 0; 
-        } else {
-          let ratio = days / cycle;
-          let offset = Math.floor(ratio * 4); 
-          moonIndex = Math.min(4 + offset, 7);
-        }
+        if (days >= cycle) moonIndex = 0; 
+        else moonIndex = Math.min(4 + Math.floor((days / cycle) * 4), 7);
       }
       displayMoon = ALL_MOONS[moonIndex];
 
-      if (days === null) {
-        statusEmoji = ""; 
-      } else if (days === 0) {
-        dayLabel = "오늘 완료 😎";
-        statusEmoji = `<span class="done-sticker">✨</span>`;
-      } else {
+      if (days === null) statusEmoji = ""; 
+      else if (days === 0) { dayLabel = "오늘 완료 😎"; statusEmoji = `<span class="done-sticker">✨</span>`; }
+      else {
         dayLabel = `D+${days}`;
         if (overdue) {
-          let pIndex = (days - cycle) - 1;
-          pIndex = Math.max(0, Math.min(pIndex, PENALTY_EMOJIS.length - 1));
+          let pIndex = Math.max(0, Math.min((days - cycle) - 1, PENALTY_EMOJIS.length - 1));
           statusEmoji = `<span class="penalty-emoji">${PENALTY_EMOJIS[pIndex]}</span>`;
-        } else {
-          statusEmoji = "";
         }
       }
 
       const assigneeLabel = zone.assignee && zone.assignee !== '공통' ? `<span class="assignee-badge">${zone.assignee} 당번</span>` : '';
       const commentsObj = (typeof zone.comments === 'object' && zone.comments !== null) ? zone.comments : {};
-      
-      const commentsHtml = Object.entries(commentsObj)
-        .map(([role, data]) => `<div class="comment-line"><span class="comment-author">${data.emoji || ''} ${role}:</span> <span class="comment-text">${data.text}</span></div>`)
-        .join("");
+      const commentsHtml = Object.entries(commentsObj).map(([role, data]) => `<div class="comment-line"><span class="comment-author">${data.emoji || ''} ${role}:</span> <span class="comment-text">${data.text}</span></div>`).join("");
       const myCommentText = commentsObj[currentRole] ? commentsObj[currentRole].text : '';
       const hasComments = Object.keys(commentsObj).length > 0;
 
@@ -338,24 +308,15 @@
         <div class="zone-main">
           <div class="zone-emoji">${zone.emoji || "📝"}${statusEmoji}</div>
           <div class="zone-info">
-            <div class="zone-name-row">
-              <strong class="zone-name">${zone.name}</strong>
-              ${assigneeLabel}
-            </div>
-            <div class="zone-meta">
-              목표 ${cycle}일 <span class="divider">|</span> 
-              <span class="${overdue ? "text-red" : (days===0 ? "text-green" : "")} bold">${dayLabel}</span>
-              ${zone.lastWho ? `<span class="last-who">(${zone.lastWho})</span>` : ""}
-            </div>
+            <div class="zone-name-row"><strong class="zone-name">${zone.name}</strong>${assigneeLabel}</div>
+            <div class="zone-meta">목표 ${cycle}일 <span class="divider">|</span> <span class="${overdue ? "text-red" : (days===0 ? "text-green" : "")} bold">${dayLabel}</span>${zone.lastWho ? `<span class="last-who">(${zone.lastWho})</span>` : ""}</div>
           </div>
-          
           <div class="zone-actions">
-            <button class="action-btn progress-btn" data-id="${zone.id}" data-moon="${displayMoon}" data-emoji="${zone.emoji||"✨"}" title="진행상황">${displayMoon}</button>
-            <button class="action-btn memo-btn ${hasComments ? 'has-memo' : ''}" data-id="${zone.id}" title="메모">💬</button>
-            <button class="action-btn edit-btn" data-id="${zone.id}" title="수정">⚙️</button>
+            <button class="action-btn progress-btn" data-id="${zone.id}" data-moon="${displayMoon}" data-emoji="${zone.emoji||"✨"}">${displayMoon}</button>
+            <button class="action-btn memo-btn ${hasComments ? 'has-memo' : ''}" data-id="${zone.id}">💬</button>
+            <button class="action-btn edit-btn" data-id="${zone.id}">⚙️</button>
           </div>
         </div>
-        
         <div class="zone-comments ${openCommentIds.has(zone.id) ? '' : 'hidden'}" id="comments-${zone.id}">
           ${commentsHtml ? `<div class="comments-list">${commentsHtml}</div>` : ""}
           <div class="comment-input-wrap">
@@ -364,15 +325,13 @@
           </div>
         </div>
       `;
-
       listEl.appendChild(card);
     });
 
     groupEl.appendChild(listEl);
     zonesEl.appendChild(groupEl);
 
-    const titleHeader = groupEl.querySelector(".group-title");
-    titleHeader.addEventListener('click', (e) => {
+    groupEl.querySelector(".group-title").addEventListener('click', (e) => {
       if(e.target.classList.contains('group-drag-handle')) return; 
       collapsedGroups[title] = !collapsedGroups[title];
       localStorage.setItem("hm_collapsed", JSON.stringify(collapsedGroups));
@@ -381,68 +340,47 @@
 
     if (!isCollapsed) {
       Sortable.create(listEl, {
-        delay: 250, 
-        delayOnTouchOnly: true, 
-        animation: 150,
-        ghostClass: "sortable-ghost", 
-        filter: ".action-btn, .comment-input", 
-        preventOnFilter: false, 
+        delay: 250, delayOnTouchOnly: true, animation: 150, ghostClass: "sortable-ghost", filter: ".action-btn, .comment-input", preventOnFilter: false,
         onEnd: async function () {
           const itemEls = Array.from(listEl.querySelectorAll('.zone-card'));
           const originalOrders = zones.map(z => z.order || Date.now()).sort((a, b) => a - b);
-          itemEls.forEach((el, index) => {
-            const id = el.dataset.id;
-            updateDoc(doc(db, ZONES_COL, id), { order: originalOrders[index] });
-          });
+          itemEls.forEach((el, index) => { updateDoc(doc(db, ZONES_COL, el.dataset.id), { order: originalOrders[index] }); });
         }
       });
     }
   }
 
-  /* ── 🌟 통합 이벤트 위임 ── */
+  /* ====================================================
+     ⚡ 통합 이벤트 처리 및 비즈니스 로직
+  ==================================================== */
   zonesEl.addEventListener("click", async (e) => {
     const target = e.target;
-
     const progBtn = target.closest(".progress-btn");
+    
     if (progBtn) {
       e.stopPropagation();
       const id = progBtn.dataset.id;
-      const currentDisplayMoon = progBtn.dataset.moon; 
-      let currentIndex = ALL_MOONS.indexOf(currentDisplayMoon);
+      let currentIndex = ALL_MOONS.indexOf(progBtn.dataset.moon);
       if (currentIndex === -1) currentIndex = 0;
-      
       const nextIndex = (currentIndex + 1) % 8; 
       vibrateShort();
       
-      if (nextIndex === 4) {
-        clearZone(id, progBtn.dataset.emoji);
-      } else if (currentIndex === 4) {
-        undoClearSilent(id, nextIndex);
-      } else {
-        updateDoc(doc(db, ZONES_COL, id), { progress: nextIndex });
-      }
+      if (nextIndex === 4) clearZone(id, progBtn.dataset.emoji);
+      else if (currentIndex === 4) undoClearSilent(id, nextIndex);
+      else updateDoc(doc(db, ZONES_COL, id), { progress: nextIndex });
       return;
     }
 
     const editBtn = target.closest(".edit-btn");
-    if (editBtn) {
-      e.stopPropagation();
-      openEditModal(editBtn.dataset.id);
-      return;
-    }
+    if (editBtn) { e.stopPropagation(); openEditModal(editBtn.dataset.id); return; }
 
     const memoBtn = target.closest(".memo-btn");
     if (memoBtn) {
       e.stopPropagation();
       const id = memoBtn.dataset.id;
-      const commentBlock = document.getElementById("comments-" + id);
-      if (openCommentIds.has(id)) {
-        openCommentIds.delete(id);
-        commentBlock.classList.add("hidden");
-      } else {
-        openCommentIds.add(id);
-        commentBlock.classList.remove("hidden");
-      }
+      const block = document.getElementById("comments-" + id);
+      if (openCommentIds.has(id)) { openCommentIds.delete(id); block.classList.add("hidden"); }
+      else { openCommentIds.add(id); block.classList.remove("hidden"); }
       return;
     }
   });
@@ -453,87 +391,53 @@
     }
   });
 
-  /* ── 기능 함수들 ──────────────────────────────── */
   async function clearZone(id, emoji) {
-    if (!currentRole) { alert("먼저 상단에서 내 역할을 선택해 주세요!"); return; }
+    if (!currentRole) { alert("상단에서 역할을 먼저 정해주세요!"); return; }
     const now = Date.now();
-    await updateDoc(doc(db, ZONES_COL, id), {
-      lastCleaned: Timestamp.fromMillis(now),
-      lastWho:     `${currentEmoji}${currentRole}`,
-      history:     arrayUnion(now),
-      progress:    4 
-    });
+    await updateDoc(doc(db, ZONES_COL, id), { lastCleaned: Timestamp.fromMillis(now), lastWho: `${currentEmoji}${currentRole}`, history: arrayUnion(now), progress: 4 });
     launchConfetti("🌝");
   }
 
   async function undoClearSilent(id, nextProgress) {
-    const zone = zonesData.find(z => z.id === id);
-    if (!zone) return;
-    
-    let newHistory = [...(zone.history || [])];
-    newHistory.pop(); 
-    
-    let newLastCleaned = null;
-    let newLastWho = "";
-    if (newHistory.length > 0) {
-      newLastCleaned = Timestamp.fromMillis(newHistory[newHistory.length - 1]);
-      newLastWho = "이전 기록 복구됨";
-    }
-
-    await updateDoc(doc(db, ZONES_COL, id), {
-      lastCleaned: newLastCleaned,
-      history: newHistory,
-      lastWho: newLastWho,
-      progress: nextProgress 
-    });
+    const zone = zonesData.find(z => z.id === id); if (!zone) return;
+    let newHistory = [...(zone.history || [])]; newHistory.pop(); 
+    let newLastCleaned = newHistory.length > 0 ? Timestamp.fromMillis(newHistory[newHistory.length - 1]) : null;
+    await updateDoc(doc(db, ZONES_COL, id), { lastCleaned: newLastCleaned, history: newHistory, lastWho: newLastCleaned ? "기록 복구됨" : "", progress: nextProgress });
   }
 
   async function updateComment(id, text) {
-    if (!currentRole) { alert("먼저 상단에서 역할을 설정해 주세요!"); return; }
-    const zone = zonesData.find(z => z.id === id);
-    if (!zone) return;
-    
+    const zone = zonesData.find(z => z.id === id); if (!zone) return;
     const comments = (typeof zone.comments === 'object' && zone.comments !== null) ? { ...zone.comments } : {};
-    
-    if (text.trim() === "") {
-      delete comments[currentRole];
-    } else {
-      comments[currentRole] = { emoji: currentEmoji, text: text.trim() };
-    }
+    if (text.trim() === "") delete comments[currentRole];
+    else comments[currentRole] = { emoji: currentEmoji, text: text.trim() };
     await updateDoc(doc(db, ZONES_COL, id), { comments });
   }
 
   async function deleteZone(id) {
-    if (!confirm("이 항목을 정말 삭제할까요?")) return;
-    await deleteDoc(doc(db, ZONES_COL, id));
-    addModal.classList.add("hidden");
+    if (!confirm("이 항목을 삭제할까요?")) return;
+    await deleteDoc(doc(db, ZONES_COL, id)); addModal.classList.add("hidden");
   }
 
-  /* ── 추가/수정 모달 ────────────────────────────── */
+  /* ====================================================
+     ⚙️ 모달 및 추가/수정 양식 제어
+  ==================================================== */
   let editingId = null;
-  fab.onclick = () => openAddModal();
-
-  function openAddModal() {
-    editingId = null;
-    addForm.reset();
+  fab.onclick = () => {
+    editingId = null; addForm.reset();
     document.getElementById("modal-title").textContent = "항목 추가";
     document.getElementById("submit-label").textContent = "추가하기";
     document.getElementById("btn-delete-zone").classList.add("hidden");
-    populateAssigneeSelect();
-    addModal.classList.remove("hidden");
-  }
+    populateAssigneeSelect(); addModal.classList.remove("hidden");
+  };
 
   function openEditModal(id) {
-    const zone = zonesData.find(z => z.id === id);
-    if (!zone) return;
-    editingId = id;
-    populateAssigneeSelect();
-    document.getElementById("inp-name").value  = zone.name  || "";
+    const zone = zonesData.find(z => z.id === id); if (!zone) return;
+    editingId = id; populateAssigneeSelect();
+    document.getElementById("inp-name").value  = zone.name || "";
     document.getElementById("inp-category").value = zone.category || "";
     document.getElementById("inp-emoji").value = zone.emoji || "";
     document.getElementById("inp-cycle").value = zone.cycle || 3;
     document.getElementById("inp-assignee").value = zone.assignee || "공통";
-    
     document.getElementById("modal-title").textContent = "항목 수정";
     document.getElementById("submit-label").textContent = "저장하기";
     document.getElementById("btn-delete-zone").classList.remove("hidden");
@@ -541,9 +445,7 @@
   }
 
   function populateAssigneeSelect() {
-    const sel = document.getElementById("inp-assignee");
-    sel.innerHTML = `<option value="공통">공통 (모두 함께)</option>` + 
-                    ROLES.map(r => `<option value="${r}">${r}</option>`).join("");
+    document.getElementById("inp-assignee").innerHTML = `<option value="공통">공통 (모두 함께)</option>` + ROLES.map(r => `<option value="${r}">${r}</option>`).join("");
   }
 
   document.getElementById("close-add-modal").onclick = () => addModal.classList.add("hidden");
@@ -551,77 +453,56 @@
 
   addForm.onsubmit = async e => {
     e.preventDefault();
-    const name     = document.getElementById("inp-name").value.trim();
+    const name = document.getElementById("inp-name").value.trim();
     const category = document.getElementById("inp-category").value.trim() || "기타";
-    const emoji    = document.getElementById("inp-emoji").value.trim() || "📝";
-    const cycle    = parseInt(document.getElementById("inp-cycle").value) || 1;
+    const emoji = document.getElementById("inp-emoji").value.trim() || "📝";
+    const cycle = parseInt(document.getElementById("inp-cycle").value) || 1;
     const assignee = document.getElementById("inp-assignee").value;
 
-    if (!name) return;
-
-    if (editingId) {
-      await updateDoc(doc(db, ZONES_COL, editingId), { name, category, emoji, cycle, assignee });
-    } else {
-      await addDoc(collection(db, ZONES_COL), {
-        name, category, emoji, cycle, assignee,
-        order: Date.now(),
-        lastCleaned: null, lastWho: "", history: [], comments: {}, progress: 0,
-        createdAt: serverTimestamp(),
-      });
-    }
-    addForm.reset();
-    addModal.classList.add("hidden");
+    if (editingId) await updateDoc(doc(db, ZONES_COL, editingId), { name, category, emoji, cycle, assignee });
+    else await addDoc(collection(db, ZONES_COL), { name, category, emoji, cycle, assignee, order: Date.now(), lastCleaned: null, lastWho: "", history: [], comments: {}, progress: 0, createdAt: serverTimestamp() });
+    addForm.reset(); addModal.classList.add("hidden");
   };
 
-  /* ── 이모지 폭죽 ──────────────────────────────── */
+  /* ── Firestore 실시간 동기화 바인딩 ── */
+  onSnapshot(collection(db, ZONES_COL), snap => {
+    zonesData = snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => (a.order || 0) - (b.order || 0));
+    renderZones();
+    const now = new Date();
+    syncTimeEl.innerText = `🔄 최근 동기화: ${now.toLocaleDateString('ko-KR')} ${now.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`;
+  });
+
+  /* ── 유틸리티: 피드백 이펙트 ── */
   function launchConfetti(emoji) {
-    const emojis = [emoji, "✨", "🎉", "⭐", emoji];
+    const emojis = [emoji, "✨", "🎉", "⭐"];
     for (let i = 0; i < 20; i++) {
-      const el = document.createElement("span");
-      el.className = "confetti-piece";
-      el.textContent = emojis[i % emojis.length];
-      el.style.left = Math.random() * 100 + "vw";
-      el.style.animationDelay = Math.random() * 0.3 + "s";
-      el.style.fontSize = (1 + Math.random() * 1.5) + "rem";
-      confettiLayer.appendChild(el);
-      setTimeout(() => el.remove(), 2000);
+      const el = document.createElement("span"); el.className = "confetti-piece"; el.textContent = emojis[i % emojis.length];
+      el.style.left = Math.random() * 100 + "vw"; el.style.animationDelay = Math.random() * 0.3 + "s"; el.style.fontSize = (1 + Math.random() * 1.5) + "rem";
+      confettiLayer.appendChild(el); setTimeout(() => el.remove(), 2000);
     }
   }
-
   function vibrateShort() { try { if (navigator.vibrate) navigator.vibrate(50); } catch(_) {} }
 
-  if (currentRole) updateMemberBadge();
-  else renderMemberModal();
-
-  addModal.addEventListener("click", e => {
-    if (e.target === addModal) addModal.classList.add("hidden");
-  });
+  if (currentRole) updateMemberBadge(); else renderMemberModal();
+  addModal.addEventListener("click", e => { if (e.target === addModal) addModal.classList.add("hidden"); });
 </script>
 
 <style>
-  /* ── Reset & Base ─────────────────────────────── */
+  /* ====================================================
+     🎨 CSS 스타일시트 구역
+  ==================================================== */
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
   :root {
-    --bg:      #F5F7F8;
-    --card:    #FFFFFF;
-    --text:    #2C3E50;
-    --sub:     #7F8C8D;
-    --green:   #2ECC71;
-    --blue:    #3498DB;
-    --red:     #E74C3C;
-    --yellow:  #F1C40F;
-    --border:  #EAECEE;
-    --radius:  12px;
-    --shadow:  0 2px 8px rgba(0,0,0,.05);
+    --bg: #F5F7F8; --card: #FFFFFF; --text: #2C3E50; --sub: #7F8C8D;
+    --green: #2ECC71; --blue: #3498DB; --red: #E74C3C; --yellow: #F1C40F;
+    --border: #EAECEE; --radius: 12px; --shadow: 0 2px 8px rgba(0,0,0,.05);
   }
-
   body {
     font-family: 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif;
     background: var(--bg); color: var(--text); min-height: 100dvh; max-width: 480px; margin: 0 auto; padding-bottom: 90px; overflow-x: hidden;
   }
 
-  /* ── Header ──────────────────────────────────── */
+  /* ── 상단 헤더 ── */
   header { background: #fff; padding: 16px 20px; box-shadow: 0 1px 3px rgba(0,0,0,.05); position: sticky; top: 0; z-index: 10; }
   .header-row { display: flex; align-items: center; justify-content: space-between; }
   .header-title { font-size: 1.15rem; font-weight: 800; }
@@ -630,35 +511,37 @@
   #my-today-count { font-size: 0.8rem; color: var(--blue); font-weight: 800; margin-right: 2px; opacity: 0.85; }
   #change-member-btn { font-size: .75rem; background: var(--bg); border: none; border-radius: 6px; padding: 4px 8px; cursor: pointer; color: var(--sub); }
 
-  /* ── King Banner ──────────────────────────────── */
-  #king-banner { margin: 16px 16px 0; background: linear-gradient(135deg, #FFD700 0%, #FFA000 100%); color: #fff; padding: 12px 16px; border-radius: 12px; font-size: 0.95rem; text-align: center; box-shadow: 0 4px 12px rgba(255, 193, 7, 0.4); animation: popIn 0.4s ease; }
+  /* ── 👑 실시간 무빙 오로라 랭킹 배너 ── */
+  #king-banner { 
+    margin: 16px 16px 0; 
+    background: linear-gradient(270deg, #FFD700, #FFA000, #FF8C00, #FFD700);
+    background-size: 600% 600%;
+    color: #fff; padding: 14px 16px; border-radius: 12px; font-size: 0.96rem; font-weight: 700; text-align: center; 
+    box-shadow: 0 4px 15px rgba(255, 140, 0, 0.45); 
+    animation: auroraGlow 6s ease infinite, wiggleDance 1.2s ease-in-out infinite alternate;
+  }
   #king-banner.hidden { display: none; }
-  @keyframes popIn { 0% { transform: scale(0.9); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
+  @keyframes auroraGlow { 0% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } 100% { background-position: 0% 50%; } }
+  @keyframes wiggleDance { 0% { transform: rotate(-1.5deg) scale(0.98); } 100% { transform: rotate(1.5deg) scale(1.02); } }
 
-  /* ── Zones ────────────────────────────────────── */
+  /* ── 메인 리스트 및 그룹 ── */
   #zones { padding: 8px 16px; }
   .zone-group { margin-top: 16px; }
   .group-title { display: flex; justify-content: space-between; align-items: center; font-size: .95rem; font-weight: 800; color: var(--sub); margin-bottom: 8px; padding: 8px 10px; background: #EAECEE; border-radius: 8px; cursor: pointer; user-select: none; }
   .group-drag-handle { font-size: 1.2rem; color: #AAB7B8; cursor: grab; padding-right: 8px; touch-action: none; }
-  .group-drag-handle:active { color: var(--blue); }
   .toggle-icon { font-size: .8rem; opacity: 0.7; }
-  .sortable-ghost-group { opacity: 0.5; background: #EBF5FB; border-radius: 8px; }
   .group-list { display: flex; flex-direction: column; gap: 10px; }
+  .sortable-ghost-group { opacity: 0.5; background: #EBF5FB; border-radius: 8px; }
 
+  /* ── 아이템 카드 UI ── */
   .zone-card { background: var(--card); border-radius: var(--radius); padding: 12px; box-shadow: var(--shadow); border: 1px solid var(--border); transition: all .2s; user-select: none; -webkit-user-select: none; }
   .zone-card.overdue { border-color: #FADBD8; background: #FDEDEC; }
   .zone-card.cleared { opacity: 0.8; border-color: #D5F5E3; background: #FAFAFA; }
   .sortable-ghost { opacity: 0.4; border: 2px dashed var(--blue); background: #EBF5FB; }
-
   .zone-main { display: flex; align-items: center; gap: 10px; }
   .zone-emoji { font-size: 1.6rem; flex-shrink: 0; min-width: 32px; text-align:center;}
   .done-sticker { display: inline-block; margin-left: 4px; animation: sparkleAnim 1s ease-in-out infinite alternate; }
-  .penalty-emoji { display: inline-block; margin-left: 4px; }
-  
-  @keyframes sparkleAnim {
-    0% { transform: scale(0.85); opacity: 0.6; filter: drop-shadow(0 0 2px rgba(255, 215, 0, 0.4)); }
-    100% { transform: scale(1.2); opacity: 1; filter: drop-shadow(0 0 8px rgba(255, 215, 0, 1)); }
-  }
+  @keyframes sparkleAnim { 0% { transform: scale(0.85); opacity: 0.6; filter: drop-shadow(0 0 2px rgba(255, 215, 0, 0.4)); } 100% { transform: scale(1.2); opacity: 1; filter: drop-shadow(0 0 8px rgba(255, 215, 0, 1)); } }
 
   .zone-info { flex: 1; display: flex; flex-direction: column; gap: 4px; }
   .zone-name-row { display: flex; align-items: center; gap: 6px; }
@@ -666,36 +549,34 @@
   .assignee-badge { font-size: .65rem; background: var(--blue); color: #fff; padding: 2px 6px; border-radius: 4px; font-weight: 600; }
   .zone-meta { font-size: .75rem; color: var(--sub); }
   .divider { margin: 0 4px; opacity: 0.5; }
-  .text-red { color: var(--red); }
-  .text-green { color: var(--green); }
+  .text-red { color: var(--red); font-weight: 700; }
+  .text-green { color: var(--green); font-weight: 700; }
   .bold { font-weight: 700; }
   .last-who { font-size: .7rem; margin-left: 4px; }
 
+  /* ── 제어 버튼 및 메모 구역 ── */
   .zone-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
-  .action-btn { width: 38px; height: 38px; border-radius: 8px; border: 1px solid var(--border); background: #F8F9F9; display: flex; align-items: center; justify-content: center; font-size: 1.15rem; cursor: pointer; transition: transform .1s, background .15s; user-select: none; }
+  .action-btn { width: 38px; height: 38px; border-radius: 8px; border: 1px solid var(--border); background: #F8F9F9; display: flex; align-items: center; justify-content: center; font-size: 1.15rem; cursor: pointer; transition: transform .1s, background .15s; }
   .action-btn:active { transform: scale(0.85); background: #EAECEE; }
   .progress-btn { background: #fff; font-size: 1.3rem; } 
-
   .zone-comments { margin-top: 12px; background: #F8F9F9; border-radius: 8px; padding: 10px; border: 1px solid #EAECEE; }
   .comments-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
   .comment-line { font-size: .8rem; color: var(--text); background: #fff; padding: 8px 10px; border-radius: 6px; border: 1px solid #EAECEE; line-height: 1.3; }
   .comment-author { font-weight: 700; color: var(--sub); margin-right: 4px; }
   .comment-input-wrap { display: flex; align-items: center; gap: 8px; }
   .my-comment-label { font-size: .75rem; font-weight: 700; color: var(--blue); white-space: nowrap; }
-  .comment-input { flex: 1; background: #fff; border: 1px solid #D5D8DC; border-radius: 6px; padding: 8px 10px; font-size: .8rem; outline: none; color: var(--text); }
-  .comment-input:focus { border-color: var(--blue); }
+  .comment-input { flex: 1; background: #fff; border: 1px solid #D5D8DC; border-radius: 6px; padding: 8px 10px; font-size: .8rem; outline: none; }
 
-  .empty-state { text-align: center; padding: 50px 20px; color: var(--sub); }
-  .empty-icon { font-size: 3rem; display: block; margin-bottom: 12px; }
-
+  /* ── 푸터 정보 및 미니 농장 ── */
   .sync-time { text-align: center; font-size: 0.75rem; color: #BDC3C7; margin-top: 15px; margin-bottom: 4px; font-weight: 600; }
-
   .farm-panel { text-align: center; font-size: 1.7rem; padding: 10px; margin: 10px 16px 35px; }
   .farm-panel b { display: inline-block; margin: 0 3px; animation: eggPop 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; }
   .farm-panel.hidden { display: none; }
   @keyframes eggPop { 0% { transform: scale(0.6); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
+  .empty-state { text-align: center; padding: 50px 20px; color: var(--sub); }
+  .empty-icon { font-size: 3rem; display: block; margin-bottom: 12px; }
 
-  /* FAB & 모달 */
+  /* ── 둥둥 띄우는 FAB 및 모달 시트 ── */
   #fab { position: fixed; bottom: 24px; right: calc(50% - 220px); width: 54px; height: 54px; border-radius: 50%; background: var(--blue); color: #fff; font-size: 1.8rem; border: none; box-shadow: 0 4px 12px rgba(52,152,219,.4); cursor: pointer; z-index: 50; }
   @media (max-width: 480px) { #fab { right: 20px; } }
   .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.4); display: flex; align-items: flex-end; justify-content: center; z-index: 100; }
@@ -705,11 +586,10 @@
   .form-group { margin-bottom: 12px; display: flex; flex-direction: column; gap: 4px; }
   .form-group label { font-size: .8rem; font-weight: 600; color: var(--sub); }
   .form-group input, .form-group select { padding: 10px 12px; border-radius: 8px; border: 1px solid #D5D8DC; font-size: .95rem; outline: none; background: #fff; }
-  .form-group input:focus, .form-group select:focus { border-color: var(--blue); }
   .btn-row { display: flex; gap: 8px; margin-top: 16px; }
-  .btn-cancel { flex: 1; padding: 12px; border-radius: 10px; border: none; background: #EAECEE; font-size: .95rem; font-weight:600; cursor: pointer; color: var(--text); }
-  .btn-submit { flex: 2; padding: 12px; border-radius: 10px; border: none; background: var(--blue); color: #fff; font-size: .95rem; font-weight: 700; cursor: pointer; }
-  .btn-delete-link { width: 100%; text-align: center; margin-top: 16px; font-size: .85rem; color: var(--red); background: none; border: none; cursor: pointer; text-decoration: underline; }
+  .btn-cancel { flex: 1; padding: 12px; border-radius: 10px; border: none; background: #EAECEE; font-size: .95rem; font-weight:600; color: var(--text); }
+  .btn-submit { flex: 2; padding: 12px; border-radius: 10px; border: none; background: var(--blue); color: #fff; font-size: .95rem; font-weight: 700; }
+  .btn-delete-link { width: 100%; text-align: center; margin-top: 16px; font-size: .85rem; color: var(--red); background: none; border: none; text-decoration: underline; }
 
   .confetti-piece { position: absolute; bottom: -20px; animation: rise 1.4s ease-out forwards; }
   @keyframes rise { 0% { transform: translateY(0) rotate(0deg); opacity: 1; } 100% { transform: translateY(-80vh) rotate(360deg); opacity: 0; } }
@@ -738,11 +618,11 @@
     <form id="add-form" autocomplete="off">
       <div class="form-group">
         <label>항목 이름</label>
-        <input id="inp-name" type="text" placeholder="예: 소파 밑, 수학 문제집 풀기 …" required />
+        <input id="inp-name" type="text" placeholder="예: 소파 밑 청소하기 …" required />
       </div>
       <div class="form-group">
         <label>그룹 분류 (폴더 지정)</label>
-        <input id="inp-category" type="text" placeholder="예: 거실, 안방, 숙제, 운동 …" required />
+        <input id="inp-category" type="text" placeholder="예: 거실, 안방, 숙제 …" required />
       </div>
       <div class="form-group" style="display:flex; flex-direction:row; gap:10px;">
         <div style="flex:1;">
@@ -771,7 +651,6 @@
   <div class="header-row">
     <span class="header-title">🤖 우리집 매니졀</span>
     <div class="member-control">
-      <!-- 나만 몰래 확인하는 나의 오늘 카운트 -->
       <span id="my-today-count"></span>
       <span id="member-badge"></span>
       <button id="change-member-btn">변경</button>
@@ -780,8 +659,6 @@
 </header>
 
 <div id="king-banner" class="hidden"></div>
-
-<!-- 🎲 룰렛 제거 완료! 깔끔해진 레이아웃 -->
 
 <div id="zones"></div>
 
