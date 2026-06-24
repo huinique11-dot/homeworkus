@@ -5,8 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
 <title>🤖 우리집 매니졀</title>
 
+<!-- 모바일 터치 드래그 앤 드롭을 위한 SortableJS 라이브러리 -->
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
 
+<!-- Firebase v10 CDN -->
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
   import {
@@ -52,8 +54,6 @@
   const myTodayCountEl= document.getElementById("my-today-count");
   
   const kingBanner    = document.getElementById("king-banner");
-  const rouletteBtn   = document.getElementById("roulette-btn");
-  const rouletteCard  = document.getElementById("roulette-card");
   const zonesEl       = document.getElementById("zones");
   const addModal      = document.getElementById("add-modal");
   const addForm       = document.getElementById("add-form");
@@ -132,14 +132,14 @@
       }
     });
 
-    // 🌟 오직 로그인한 본인한테만 이름 왼쪽에 개수 작게 노출!
+    // 1. 로그인한 본인한테만 이름 옆에 개수 노출
     if (currentRole && counts[currentRole] > 0) {
       myTodayCountEl.innerText = `(${counts[currentRole]})`;
     } else {
       myTodayCountEl.innerText = `(0)`;
     }
 
-    // 🌟 활동왕 배너에서 미션 달성 개수 숫자는 비밀로 감춤 (다른 사람이 더 불타오르게! 🔥)
+    // 2. 🌟 활동왕 배너에서 개수 표기를 철저하게 완전 삭제!
     if(maxCount > 0) {
       kingBanner.innerHTML = `🏆 오늘의 활동왕: <strong>${kingEmoji} ${kingRole}</strong>`;
       kingBanner.classList.remove("hidden");
@@ -173,7 +173,7 @@
         let eggs = parseInt(localStorage.getItem("hm_farm_eggs") || "0");
         eggs += 1;
         localStorage.setItem("hm_farm_eggs", eggs);
-        alert(`🎉 밤 9시 정산 완료! 깜짝 선물이 도착했습니다! 🥚`);
+        alert("🎉 밤 9시 정산 완료! 깜짝 선물이 도착했습니다! 🥚");
       }
     }
 
@@ -573,34 +573,6 @@
     addModal.classList.add("hidden");
   };
 
-  /* ── 랜덤 룰렛 ──────────────────────────── */
-  rouletteBtn.onclick = () => {
-    if (rouletteActive || zonesData.length === 0) return;
-    const candidates = zonesData.filter(z => {
-      const d = daysSince(z.lastCleaned);
-      return d === null || d >= (z.cycle || 3);
-    });
-    const pool = candidates.length ? candidates : zonesData;
-    let idx = 0, spins = 0, total = 14;
-    rouletteActive = true;
-    rouletteCard.classList.remove("hidden");
-
-    const spin = () => {
-      rouletteCard.textContent = `${pool[idx % pool.length].emoji} ${pool[idx % pool.length].name}`;
-      idx++; spins++;
-      if (spins < total) {
-        setTimeout(spin, 80 + spins * 18);
-      } else {
-        const picked = pool[(idx-1) % pool.length];
-        rouletteCard.textContent = `👉 ${picked.emoji} ${picked.name} 당첨!`;
-        vibrateShort();
-        rouletteActive = false;
-        setTimeout(() => rouletteCard.classList.add("hidden"), 4000);
-      }
-    };
-    spin();
-  };
-
   /* ── 이모지 폭죽 ──────────────────────────────── */
   function launchConfetti(emoji) {
     const emojis = [emoji, "✨", "🎉", "⭐", emoji];
@@ -655,7 +627,6 @@
   .header-title { font-size: 1.15rem; font-weight: 800; }
   .member-control { display: flex; align-items: center; gap: 4px; }
   #member-badge { font-size: .9rem; font-weight: 700; }
-  /* 🌟 나만의 비밀 카운트 스타일 (작고 소중하게 상단에만 노출) */
   #my-today-count { font-size: 0.8rem; color: var(--blue); font-weight: 800; margin-right: 2px; opacity: 0.85; }
   #change-member-btn { font-size: .75rem; background: var(--bg); border: none; border-radius: 6px; padding: 4px 8px; cursor: pointer; color: var(--sub); }
 
@@ -663,12 +634,6 @@
   #king-banner { margin: 16px 16px 0; background: linear-gradient(135deg, #FFD700 0%, #FFA000 100%); color: #fff; padding: 12px 16px; border-radius: 12px; font-size: 0.95rem; text-align: center; box-shadow: 0 4px 12px rgba(255, 193, 7, 0.4); animation: popIn 0.4s ease; }
   #king-banner.hidden { display: none; }
   @keyframes popIn { 0% { transform: scale(0.9); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
-
-  /* ── Roulette ─────────────────────────────────── */
-  .roulette-wrap { padding: 12px 16px 0; }
-  #roulette-btn { width: 100%; padding: 12px; border-radius: var(--radius); border: none; background: #fff; color: var(--text); font-size: .95rem; font-weight: 700; cursor: pointer; box-shadow: var(--shadow); border: 1px solid var(--border); }
-  #roulette-card { margin-top: 8px; background: var(--yellow); border-radius: var(--radius); padding: 12px; font-size: 1rem; font-weight: 700; text-align: center; }
-  .hidden { display: none !important; }
 
   /* ── Zones ────────────────────────────────────── */
   #zones { padding: 8px 16px; }
@@ -806,6 +771,7 @@
   <div class="header-row">
     <span class="header-title">🤖 우리집 매니졀</span>
     <div class="member-control">
+      <!-- 나만 몰래 확인하는 나의 오늘 카운트 -->
       <span id="my-today-count"></span>
       <span id="member-badge"></span>
       <button id="change-member-btn">변경</button>
@@ -815,10 +781,7 @@
 
 <div id="king-banner" class="hidden"></div>
 
-<div class="roulette-wrap">
-  <button id="roulette-btn">🎲 오늘 뭐 할까? (랜덤 뽑기)</button>
-  <div id="roulette-card" class="hidden"></div>
-</div>
+<!-- 🎲 룰렛 제거 완료! 깔끔해진 레이아웃 -->
 
 <div id="zones"></div>
 
