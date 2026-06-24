@@ -174,13 +174,11 @@
       const myCommentText = commentsObj[currentRole] ? commentsObj[currentRole].text : '';
 
       const card = document.createElement("div");
-      // data-id를 추가하여 드래그 앤 드롭 시 어느 문서인지 식별
       card.className = `zone-card ${overdue ? "overdue" : ""} ${days===0 ? "cleared" : ""}`;
       card.dataset.id = zone.id; 
       
       card.innerHTML = `
         <div class="zone-main">
-          <div class="drag-handle">↕️</div>
           <div class="zone-emoji">${zone.emoji || "🧹"}${statusEmoji}</div>
           <div class="zone-info">
             <div class="zone-name-row">
@@ -227,11 +225,12 @@
     /* 드래그 앤 드롭 (SortableJS) 적용 */
     if (!isCollapsed) {
       Sortable.create(listEl, {
-        handle: '.drag-handle', // ↕️ 아이콘이나 영역을 잡고 끌기
-        delay: 200, // 모바일에서 길게 누르기(200ms)로 작동
-        delayOnTouchOnly: true, // PC에서는 딜레이 없이 바로 드래그
+        delay: 250, // 0.25초 이상 꾹 누르고 있어야 드래그 시작 (모바일 스크롤 방해 방지)
+        delayOnTouchOnly: true, // PC에서는 마우스로 바로 드래그 가능
         animation: 150,
-        ghostClass: "sortable-ghost", // 드래그 중인 아이템의 투명도 효과
+        ghostClass: "sortable-ghost", // 드래그 중인 아이템 이펙트
+        filter: "button, input", // 버튼이나 입력창을 누를 때는 드래그 무시
+        preventOnFilter: false, // 클릭 이벤트가 정상 작동하도록 허용
         onEnd: async function () {
           // 드래그가 끝난 후, 이 그룹에 속한 아이템들의 새 순서를 파악
           const itemEls = Array.from(listEl.querySelectorAll('.zone-card'));
@@ -564,6 +563,9 @@
     box-shadow: var(--shadow);
     border: 1px solid var(--border);
     transition: all .2s;
+    /* 모바일에서 길게 누를 때 브라우저 기본 동작(텍스트 선택 등) 방지 */
+    user-select: none;
+    -webkit-user-select: none;
   }
   .zone-card.overdue { border-color: #FADBD8; background: #FDEDEC; }
   .zone-card.cleared { opacity: 0.8; border-color: #D5F5E3; }
@@ -576,15 +578,6 @@
     align-items: center;
     gap: 10px;
   }
-
-  .drag-handle {
-    font-size: 1.2rem;
-    color: #BDC3C7;
-    cursor: grab;
-    padding: 5px;
-    touch-action: none; /* 모바일 스크롤 방지 */
-  }
-  .drag-handle:active { cursor: grabbing; color: var(--blue); }
 
   .zone-emoji { font-size: 1.6rem; flex-shrink: 0; min-width: 32px; text-align:center;}
 
