@@ -5,8 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
 <title>📋 우리 집 매니저</title>
 
+<!-- 모바일 터치 드래그 앤 드롭을 위한 SortableJS 라이브러리 -->
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
 
+<!-- Firebase v10 CDN -->
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
   import {
@@ -35,6 +37,7 @@
   /* ── 역할 목록 ───────────────────────────── */
   const ROLES = ["아빠", "엄마", "미네"];
   const PENALTY_EMOJIS = ["🙄","😛","😜","🤪","😶","🤨","🤔","🤫","🫣","🫩","😵‍💫","🤢","🤮","😠","😡","🤬","👿","☠️"];
+  const MOON_PHASES = ["🌑", "🌒", "🌓", "🌔", "🌝"]; // 달 차오르는 단계
 
   /* ── 상태 ─────────────────────────────────────── */
   let currentRole  = localStorage.getItem("hm_role") || null;
@@ -88,7 +91,6 @@
   /* ── Firestore 실시간 구독 ─────────────────────── */
   onSnapshot(collection(db, ZONES_COL), snap => {
     zonesData = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    // 항목 내 순서
     zonesData.sort((a, b) => (a.order || 0) - (b.order || 0));
     renderZones();
   });
@@ -113,7 +115,6 @@
     let kingEmoji = "👑";
 
     zonesData.forEach(z => {
-      // 오늘 완료한 항목 찾기
       if(daysSince(z.lastCleaned) === 0 && z.lastWho) {
         ROLES.forEach(r => {
           if(z.lastWho.includes(r)) {
@@ -121,7 +122,6 @@
             if(counts[r] > maxCount) {
               maxCount = counts[r];
               kingRole = r;
-              // "🐻아빠" 에서 이모지만 추출 시도
               kingEmoji = z.lastWho.replace(r, '').trim() || "👑";
             }
           }
@@ -140,7 +140,7 @@
   /* ── 리스트 렌더링 ─────────────────────────── */
   function renderZones() {
     zonesEl.innerHTML = "";
-    updateKingBanner(); // 렌더링 시 활동왕 업데이트
+    updateKingBanner(); 
 
     if (zonesData.length === 0) {
       zonesEl.innerHTML = `<div class="empty-state"><span class="empty-icon">📝</span><p>아직 항목이 없어요.<br>+ 버튼으로 할 일을 추가해 보세요!</p></div>`;
@@ -161,7 +161,6 @@
       if (catZones.length > 0) renderGroups.push({ title: `📂 ${cat}`, zones: catZones });
     });
 
-    // 사용자가 저장한 그룹(폴더) 순서대로 정렬
     let savedGroupOrder = JSON.parse(localStorage.getItem('hm_group_order') || "[]");
     renderGroups.sort((a, b) => {
       let idxA = savedGroupOrder.indexOf(a.title);
@@ -173,9 +172,8 @@
 
     renderGroups.forEach(group => renderGroupUI(group.title, group.zones));
 
-    // 그룹(폴더) 자체를 위아래로 끌어서 옮길 수 있도록 Sortable 적용
     Sortable.create(zonesEl, {
-      handle: '.group-drag-handle', // ≡ 아이콘 잡고 끌기
+      handle: '.group-drag-handle',
       animation: 150,
       delay: 150,
       delayOnTouchOnly: true,
@@ -193,7 +191,6 @@
     const groupEl = document.createElement("div");
     groupEl.className = "zone-group";
     
-    // 제목과 드래그 핸들
     groupEl.innerHTML = `
       <div class="group-title" data-title="${title}">
         <div style="display:flex; align-items:center;">
@@ -211,6 +208,7 @@
       const days = daysSince(zone.lastCleaned);
       const cycle = zone.cycle || 3;
       const overdue = days !== null && days > cycle;
+      const progress = zone.progress || 0; // 달력 단계 (0~3)
 
       let statusEmoji = "";
       let dayLabel = "기록 없음";
@@ -246,7 +244,7 @@
       
       card.innerHTML = `
         <div class="zone-main">
-          <div class="zone-emoji">${zone.emoji || "✅"}${statusEmoji}</div>
+          <div class="zone-emoji">${zone.emoji || "📝"}${statusEmoji}</div>
           <div class="zone-info">
             <div class="zone-name-row">
               <strong class="zone-name">${zone.name}</strong>
@@ -261,8 +259,10 @@
           
           <div class="zone-actions">
             ${ days === 0 
-              ? `<button class="action-btn undo-btn" data-id="${zone.id}" title="취소">✅</button>` 
-              : `<button class="action-btn clear-btn" data-id="${zone.id}" data-emoji="${zone.emoji||"✨"}" title="완료">⬜</button>`
+              ? `<button class="action-btn undo-btn" data-id="${zone.id}" title="취소">↩️</button>` 
+              : `<button class="action-btn progress-btn" data-id="${zone.id}" data-prog="${progress}" data-emoji="${zone.emoji||"✨"}" title="진행상황">
+                  ${MOON_PHASES[progress]}
+                 </button>`
             }
             <button class="action-btn memo-btn ${hasComments ? 'has-memo' : ''}" data-id="${zone.id}" title="메모">💬</button>
             <button class="action-btn edit-btn" data-id="${zone.id}" title="수정">⚙️</button>
@@ -284,16 +284,14 @@
     groupEl.appendChild(listEl);
     zonesEl.appendChild(groupEl);
 
-    /* 그룹 접기/펴기 이벤트 (드래그 핸들은 제외) */
     const titleHeader = groupEl.querySelector(".group-title");
     titleHeader.addEventListener('click', (e) => {
-      if(e.target.classList.contains('group-drag-handle')) return; // 핸들 누를 땐 안 접힘
+      if(e.target.classList.contains('group-drag-handle')) return; 
       collapsedGroups[title] = !collapsedGroups[title];
       localStorage.setItem("hm_collapsed", JSON.stringify(collapsedGroups));
       renderZones(); 
     });
 
-    /* 항목 드래그 앤 드롭 */
     if (!isCollapsed) {
       Sortable.create(listEl, {
         delay: 250, 
@@ -314,7 +312,22 @@
     }
 
     /* 이벤트 위임 */
-    listEl.querySelectorAll(".clear-btn").forEach(btn => btn.onclick = () => clearZone(btn.dataset.id, btn.dataset.emoji));
+    listEl.querySelectorAll(".progress-btn").forEach(btn => {
+      btn.onclick = async () => {
+        const id = btn.dataset.id;
+        const currentProg = parseInt(btn.dataset.prog);
+        vibrateShort();
+        
+        if (currentProg < 3) {
+          // 달 차오르기 (0 -> 1 -> 2 -> 3)
+          await updateDoc(doc(db, ZONES_COL, id), { progress: currentProg + 1 });
+        } else {
+          // 3(🌔)에서 한 번 더 누르면 4(🌝) 완료 처리!
+          clearZone(id, btn.dataset.emoji);
+        }
+      };
+    });
+
     listEl.querySelectorAll(".undo-btn").forEach(btn => btn.onclick = () => undoClear(btn.dataset.id));
     listEl.querySelectorAll(".edit-btn").forEach(btn => btn.onclick = () => openEditModal(btn.dataset.id));
     listEl.querySelectorAll(".comment-input").forEach(inp => inp.onchange = (e) => updateComment(inp.dataset.id, e.target.value));
@@ -343,8 +356,10 @@
       lastCleaned: Timestamp.fromMillis(now),
       lastWho:     `${currentEmoji}${currentRole}`,
       history:     arrayUnion(now),
+      progress:    0 // 완료 시 다음 주기를 위해 달을 다시 🌑으로 초기화
     });
-    launchConfetti(emoji);
+    // 보름달(🌝)이 완료 폭죽과 함께 뜹니다!
+    launchConfetti("🌝");
   }
 
   async function undoClear(id) {
@@ -365,7 +380,8 @@
     await updateDoc(doc(db, ZONES_COL, id), {
       lastCleaned: newLastCleaned,
       history: newHistory,
-      lastWho: newLastWho
+      lastWho: newLastWho,
+      progress: 3 // 취소하면 🌔 상태로 되돌려줌
     });
   }
 
@@ -447,7 +463,7 @@
       await addDoc(collection(db, ZONES_COL), {
         name, category, emoji, cycle, assignee,
         order: Date.now(),
-        lastCleaned: null, lastWho: "", history: [], comments: {},
+        lastCleaned: null, lastWho: "", history: [], comments: {}, progress: 0,
         createdAt: serverTimestamp(),
       });
     }
@@ -648,8 +664,8 @@
   }
   .action-btn:active { transform: scale(0.9); }
   
-  .clear-btn { background: #fff; }
-  .undo-btn { background: #D5F5E3; border-color: #A9DFBF; font-size: .9rem; }
+  .progress-btn { background: #fff; font-size: 1.2rem; } /* 달 모양을 위해 약간 더 크게 */
+  .undo-btn { background: #D5F5E3; border-color: #A9DFBF; font-size: 1.1rem; }
   
   /* 코멘트가 있을 때 메모 버튼에 알림 표시 */
   .memo-btn { position: relative; }
@@ -739,6 +755,7 @@
 </head>
 <body>
 
+<!-- 역할 설정 모달 -->
 <div class="modal-overlay hidden" id="member-modal">
   <div class="modal-sheet">
     <p class="modal-title">👋 내 역할과 이모지 선택</p>
@@ -754,6 +771,7 @@
   </div>
 </div>
 
+<!-- 추가/수정 모달 -->
 <div class="modal-overlay hidden" id="add-modal">
   <div class="modal-sheet">
     <p class="modal-title" id="modal-title">항목 추가</p>
@@ -789,6 +807,7 @@
   </div>
 </div>
 
+<!-- 헤더 -->
 <header>
   <div class="header-row">
     <span class="header-title">📋 우리 집 매니저</span>
@@ -799,17 +818,22 @@
   </div>
 </header>
 
+<!-- 활동왕 랭킹 배너 -->
 <div id="king-banner" class="hidden"></div>
 
+<!-- 랜덤 룰렛 -->
 <div class="roulette-wrap">
   <button id="roulette-btn">🎲 오늘 뭐 할까? (랜덤 뽑기)</button>
   <div id="roulette-card" class="hidden"></div>
 </div>
 
+<!-- 항목 목록 -->
 <div id="zones"></div>
 
+<!-- FAB -->
 <button id="fab" title="항목 추가">+</button>
 
+<!-- 폭죽 레이어 -->
 <div id="confetti-layer"></div>
 
 </body>
