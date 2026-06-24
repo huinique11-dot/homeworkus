@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-<title>🏠 우리 집 청소 매니저</title>
+<title>📋 우리 집 매니저</title>
 
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
 
@@ -40,7 +40,7 @@
   let currentRole  = localStorage.getItem("hm_role") || null;
   let currentEmoji = localStorage.getItem("hm_emoji") || null;
   let collapsedGroups = JSON.parse(localStorage.getItem("hm_collapsed") || "{}"); 
-  let openCommentIds = new Set(); // 💬 메모 창이 열려있는 구역 ID 기억
+  let openCommentIds = new Set();
   let zonesData    = [];
   let rouletteActive = false;
 
@@ -51,6 +51,7 @@
   const saveMemberBtn = document.getElementById("save-member-btn");
   const memberBadge   = document.getElementById("member-badge");
   
+  const kingBanner    = document.getElementById("king-banner");
   const rouletteBtn   = document.getElementById("roulette-btn");
   const rouletteCard  = document.getElementById("roulette-card");
   const zonesEl       = document.getElementById("zones");
@@ -87,6 +88,7 @@
   /* ── Firestore 실시간 구독 ─────────────────────── */
   onSnapshot(collection(db, ZONES_COL), snap => {
     zonesData = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    // 항목 내 순서
     zonesData.sort((a, b) => (a.order || 0) - (b.order || 0));
     renderZones();
   });
@@ -102,35 +104,102 @@
     return Math.floor((today - target) / 86400000);
   }
 
-  /* ── 구역 카드 렌더링 ─────────────────────────── */
+  /* ── 오늘의 활동왕 계산 ────────────────────────── */
+  function updateKingBanner() {
+    let counts = {};
+    ROLES.forEach(r => counts[r] = 0);
+    let maxCount = 0;
+    let kingRole = null;
+    let kingEmoji = "👑";
+
+    zonesData.forEach(z => {
+      // 오늘 완료한 항목 찾기
+      if(daysSince(z.lastCleaned) === 0 && z.lastWho) {
+        ROLES.forEach(r => {
+          if(z.lastWho.includes(r)) {
+            counts[r]++;
+            if(counts[r] > maxCount) {
+              maxCount = counts[r];
+              kingRole = r;
+              // "🐻아빠" 에서 이모지만 추출 시도
+              kingEmoji = z.lastWho.replace(r, '').trim() || "👑";
+            }
+          }
+        });
+      }
+    });
+
+    if(maxCount > 0) {
+      kingBanner.innerHTML = `🏆 오늘의 활동왕: <strong>${kingEmoji} ${kingRole}</strong> (${maxCount}개 완료!)`;
+      kingBanner.classList.remove("hidden");
+    } else {
+      kingBanner.classList.add("hidden");
+    }
+  }
+
+  /* ── 리스트 렌더링 ─────────────────────────── */
   function renderZones() {
     zonesEl.innerHTML = "";
+    updateKingBanner(); // 렌더링 시 활동왕 업데이트
+
     if (zonesData.length === 0) {
-      zonesEl.innerHTML = `<div class="empty-state"><span class="empty-icon">🧹</span><p>아직 구역이 없어요.<br>+ 버튼으로 첫 구역을 추가해 보세요!</p></div>`;
+      zonesEl.innerHTML = `<div class="empty-state"><span class="empty-icon">📝</span><p>아직 항목이 없어요.<br>+ 버튼으로 할 일을 추가해 보세요!</p></div>`;
       return;
     }
 
     const myZones = zonesData.filter(z => z.assignee === currentRole);
     const otherZones = zonesData.filter(z => z.assignee !== currentRole);
 
-    if (myZones.length > 0) renderGroup("📌 내 당번 구역", myZones);
+    let renderGroups = [];
+    if (myZones.length > 0) {
+      renderGroups.push({ title: "📌 내 당번 항목", zones: myZones });
+    }
 
-    const categories = [...new Set(otherZones.map(z => z.category || "기타 공간"))];
+    const categories = [...new Set(otherZones.map(z => z.category || "기타"))];
     categories.forEach(cat => {
-      const catZones = otherZones.filter(z => (z.category || "기타 공간") === cat);
-      if (catZones.length > 0) renderGroup(`🏠 ${cat}`, catZones);
+      const catZones = otherZones.filter(z => (z.category || "기타") === cat);
+      if (catZones.length > 0) renderGroups.push({ title: `📂 ${cat}`, zones: catZones });
+    });
+
+    // 사용자가 저장한 그룹(폴더) 순서대로 정렬
+    let savedGroupOrder = JSON.parse(localStorage.getItem('hm_group_order') || "[]");
+    renderGroups.sort((a, b) => {
+      let idxA = savedGroupOrder.indexOf(a.title);
+      let idxB = savedGroupOrder.indexOf(b.title);
+      if(idxA === -1) idxA = 999;
+      if(idxB === -1) idxB = 999;
+      return idxA - idxB;
+    });
+
+    renderGroups.forEach(group => renderGroupUI(group.title, group.zones));
+
+    // 그룹(폴더) 자체를 위아래로 끌어서 옮길 수 있도록 Sortable 적용
+    Sortable.create(zonesEl, {
+      handle: '.group-drag-handle', // ≡ 아이콘 잡고 끌기
+      animation: 150,
+      delay: 150,
+      delayOnTouchOnly: true,
+      ghostClass: "sortable-ghost-group",
+      onEnd: function () {
+        const titles = Array.from(zonesEl.querySelectorAll('.group-title')).map(el => el.dataset.title);
+        localStorage.setItem('hm_group_order', JSON.stringify(titles));
+      }
     });
   }
 
-  function renderGroup(title, zones) {
+  function renderGroupUI(title, zones) {
     const isCollapsed = collapsedGroups[title] || false;
     
     const groupEl = document.createElement("div");
     groupEl.className = "zone-group";
     
+    // 제목과 드래그 핸들
     groupEl.innerHTML = `
       <div class="group-title" data-title="${title}">
-        <span>${title}</span>
+        <div style="display:flex; align-items:center;">
+          <span class="group-drag-handle" title="그룹 이동">≡</span>
+          <span class="group-name-text">${title}</span>
+        </div>
         <span class="toggle-icon">${isCollapsed ? "◀️" : "🔽"}</span>
       </div>
     `;
@@ -169,7 +238,6 @@
         .join("");
       const myCommentText = commentsObj[currentRole] ? commentsObj[currentRole].text : '';
       
-      // 코멘트가 하나라도 있으면 메모 아이콘에 파란색 점(알림) 표시
       const hasComments = Object.keys(commentsObj).length > 0;
 
       const card = document.createElement("div");
@@ -178,7 +246,7 @@
       
       card.innerHTML = `
         <div class="zone-main">
-          <div class="zone-emoji">${zone.emoji || "🧹"}${statusEmoji}</div>
+          <div class="zone-emoji">${zone.emoji || "✅"}${statusEmoji}</div>
           <div class="zone-info">
             <div class="zone-name-row">
               <strong class="zone-name">${zone.name}</strong>
@@ -194,7 +262,7 @@
           <div class="zone-actions">
             ${ days === 0 
               ? `<button class="action-btn undo-btn" data-id="${zone.id}" title="취소">✅</button>` 
-              : `<button class="action-btn clear-btn" data-id="${zone.id}" data-emoji="${zone.emoji||"🧹"}" title="완료">⬜</button>`
+              : `<button class="action-btn clear-btn" data-id="${zone.id}" data-emoji="${zone.emoji||"✨"}" title="완료">⬜</button>`
             }
             <button class="action-btn memo-btn ${hasComments ? 'has-memo' : ''}" data-id="${zone.id}" title="메모">💬</button>
             <button class="action-btn edit-btn" data-id="${zone.id}" title="수정">⚙️</button>
@@ -216,21 +284,23 @@
     groupEl.appendChild(listEl);
     zonesEl.appendChild(groupEl);
 
-    /* 그룹 접기/펴기 이벤트 */
-    groupEl.querySelector(".group-title").onclick = () => {
+    /* 그룹 접기/펴기 이벤트 (드래그 핸들은 제외) */
+    const titleHeader = groupEl.querySelector(".group-title");
+    titleHeader.addEventListener('click', (e) => {
+      if(e.target.classList.contains('group-drag-handle')) return; // 핸들 누를 땐 안 접힘
       collapsedGroups[title] = !collapsedGroups[title];
       localStorage.setItem("hm_collapsed", JSON.stringify(collapsedGroups));
       renderZones(); 
-    };
+    });
 
-    /* 드래그 앤 드롭 (SortableJS) */
+    /* 항목 드래그 앤 드롭 */
     if (!isCollapsed) {
       Sortable.create(listEl, {
         delay: 250, 
         delayOnTouchOnly: true, 
         animation: 150,
         ghostClass: "sortable-ghost", 
-        filter: "button, input", // 액션 버튼과 인풋에서는 드래그 막기
+        filter: "button, input", 
         preventOnFilter: false, 
         onEnd: async function () {
           const itemEls = Array.from(listEl.querySelectorAll('.zone-card'));
@@ -249,7 +319,6 @@
     listEl.querySelectorAll(".edit-btn").forEach(btn => btn.onclick = () => openEditModal(btn.dataset.id));
     listEl.querySelectorAll(".comment-input").forEach(inp => inp.onchange = (e) => updateComment(inp.dataset.id, e.target.value));
     
-    /* 메모 창 토글 (열기/닫기) */
     listEl.querySelectorAll(".memo-btn").forEach(btn => {
       btn.onclick = () => {
         const id = btn.dataset.id;
@@ -279,7 +348,7 @@
   }
 
   async function undoClear(id) {
-    if (!confirm("청소 완료 기록을 취소하시겠습니까?")) return;
+    if (!confirm("완료 기록을 취소하시겠습니까?")) return;
     const zone = zonesData.find(z => z.id === id);
     if (!zone) return;
     
@@ -316,7 +385,7 @@
   }
 
   async function deleteZone(id) {
-    if (!confirm("이 구역을 정말 삭제할까요?")) return;
+    if (!confirm("이 항목을 정말 삭제할까요?")) return;
     await deleteDoc(doc(db, ZONES_COL, id));
     addModal.classList.add("hidden");
   }
@@ -329,7 +398,7 @@
   function openAddModal() {
     editingId = null;
     addForm.reset();
-    document.getElementById("modal-title").textContent = "구역 추가";
+    document.getElementById("modal-title").textContent = "항목 추가";
     document.getElementById("submit-label").textContent = "추가하기";
     document.getElementById("btn-delete-zone").classList.add("hidden");
     populateAssigneeSelect();
@@ -347,7 +416,7 @@
     document.getElementById("inp-cycle").value = zone.cycle || 3;
     document.getElementById("inp-assignee").value = zone.assignee || "공통";
     
-    document.getElementById("modal-title").textContent = "구역 수정";
+    document.getElementById("modal-title").textContent = "항목 수정";
     document.getElementById("submit-label").textContent = "저장하기";
     document.getElementById("btn-delete-zone").classList.remove("hidden");
     addModal.classList.remove("hidden");
@@ -365,9 +434,9 @@
   addForm.onsubmit = async e => {
     e.preventDefault();
     const name     = document.getElementById("inp-name").value.trim();
-    const category = document.getElementById("inp-category").value.trim() || "기타 공간";
-    const emoji    = document.getElementById("inp-emoji").value.trim() || "🧹";
-    const cycle    = parseInt(document.getElementById("inp-cycle").value) || 3;
+    const category = document.getElementById("inp-category").value.trim() || "기타";
+    const emoji    = document.getElementById("inp-emoji").value.trim() || "📝";
+    const cycle    = parseInt(document.getElementById("inp-cycle").value) || 1;
     const assignee = document.getElementById("inp-assignee").value;
 
     if (!name) return;
@@ -416,7 +485,7 @@
 
   /* ── 이모지 폭죽 ──────────────────────────────── */
   function launchConfetti(emoji) {
-    const emojis = [emoji, "✨", "🧼", "🎉", emoji, "⭐"];
+    const emojis = [emoji, "✨", "🎉", "⭐", emoji];
     for (let i = 0; i < 20; i++) {
       const el = document.createElement("span");
       el.className = "confetti-piece";
@@ -488,6 +557,24 @@
     border-radius: 6px; padding: 4px 8px; cursor: pointer; color: var(--sub);
   }
 
+  /* ── King Banner ──────────────────────────────── */
+  #king-banner {
+    margin: 16px 16px 0;
+    background: linear-gradient(135deg, #FFD700 0%, #FFA000 100%);
+    color: #fff;
+    padding: 12px 16px;
+    border-radius: 12px;
+    font-size: 0.95rem;
+    text-align: center;
+    box-shadow: 0 4px 12px rgba(255, 193, 7, 0.4);
+    animation: popIn 0.4s ease;
+  }
+  #king-banner.hidden { display: none; }
+  @keyframes popIn {
+    0% { transform: scale(0.9); opacity: 0; }
+    100% { transform: scale(1); opacity: 1; }
+  }
+
   /* ── Roulette ─────────────────────────────────── */
   .roulette-wrap { padding: 12px 16px 0; }
   #roulette-btn {
@@ -511,7 +598,16 @@
     padding: 8px 10px; background: #EAECEE; border-radius: 8px;
     cursor: pointer; user-select: none;
   }
+  .group-drag-handle {
+    font-size: 1.2rem;
+    color: #AAB7B8;
+    cursor: grab;
+    padding-right: 8px;
+    touch-action: none;
+  }
+  .group-drag-handle:active { color: var(--blue); }
   .toggle-icon { font-size: .8rem; opacity: 0.7; }
+  .sortable-ghost-group { opacity: 0.5; background: #EBF5FB; border-radius: 8px; }
   
   .group-list { display: flex; flex-direction: column; gap: 10px; }
 
@@ -583,6 +679,10 @@
     padding: 8px 10px; font-size: .8rem; outline: none; color: var(--text);
   }
   .comment-input:focus { border-color: var(--blue); }
+
+  /* ── Empty State ─────────────────────────────── */
+  .empty-state { text-align: center; padding: 50px 20px; color: var(--sub); }
+  .empty-icon { font-size: 3rem; display: block; margin-bottom: 12px; }
 
   /* ── FAB ──────────────────────────────────────── */
   #fab {
@@ -656,24 +756,24 @@
 
 <div class="modal-overlay hidden" id="add-modal">
   <div class="modal-sheet">
-    <p class="modal-title" id="modal-title">구역 추가</p>
+    <p class="modal-title" id="modal-title">항목 추가</p>
     <form id="add-form" autocomplete="off">
       <div class="form-group">
-        <label>구역 이름</label>
-        <input id="inp-name" type="text" placeholder="예: 소파 밑, 책상 위 …" required />
+        <label>항목 이름</label>
+        <input id="inp-name" type="text" placeholder="예: 소파 밑, 수학 문제집 풀기 …" required />
       </div>
       <div class="form-group">
-        <label>공간 분류 (그룹핑 용도)</label>
-        <input id="inp-category" type="text" placeholder="예: 거실, 아이방, 안방 …" required />
+        <label>그룹 분류 (폴더 지정)</label>
+        <input id="inp-category" type="text" placeholder="예: 거실, 안방, 숙제, 운동 …" required />
       </div>
       <div class="form-group" style="display:flex; flex-direction:row; gap:10px;">
         <div style="flex:1;">
           <label>이모지</label>
-          <input id="inp-emoji" type="text" placeholder="🛋️" maxlength="4" style="width:100%;" />
+          <input id="inp-emoji" type="text" placeholder="📝" maxlength="4" style="width:100%;" />
         </div>
         <div style="flex:1;">
           <label>목표 주기 (일)</label>
-          <input id="inp-cycle" type="number" min="1" value="3" required style="width:100%;" />
+          <input id="inp-cycle" type="number" min="1" value="1" required style="width:100%;" />
         </div>
       </div>
       <div class="form-group">
@@ -684,14 +784,14 @@
         <button type="button" class="btn-cancel" id="close-add-modal">닫기</button>
         <button type="submit" class="btn-submit" id="submit-label">추가하기</button>
       </div>
-      <button type="button" class="btn-delete-link hidden" id="btn-delete-zone">이 구역 삭제하기</button>
+      <button type="button" class="btn-delete-link hidden" id="btn-delete-zone">이 항목 삭제하기</button>
     </form>
   </div>
 </div>
 
 <header>
   <div class="header-row">
-    <span class="header-title">🏠 우리 집 청소 매니저</span>
+    <span class="header-title">📋 우리 집 매니저</span>
     <div class="member-control">
       <span id="member-badge"></span>
       <button id="change-member-btn">변경</button>
@@ -699,14 +799,16 @@
   </div>
 </header>
 
+<div id="king-banner" class="hidden"></div>
+
 <div class="roulette-wrap">
-  <button id="roulette-btn">🎲 오늘 어디 치울까? (랜덤 뽑기)</button>
+  <button id="roulette-btn">🎲 오늘 뭐 할까? (랜덤 뽑기)</button>
   <div id="roulette-card" class="hidden"></div>
 </div>
 
 <div id="zones"></div>
 
-<button id="fab" title="구역 추가">+</button>
+<button id="fab" title="항목 추가">+</button>
 
 <div id="confetti-layer"></div>
 
