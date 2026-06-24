@@ -5,7 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
 <title>🏠 우리 집 청소 매니저</title>
 
-<!-- Firebase v10 CDN -->
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
+
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
   import {
@@ -17,7 +18,7 @@
   /* ====================================================
      🔑 여기에 본인의 Firebase 프로젝트 설정을 입력하세요.
   ==================================================== */
-const firebaseConfig = {
+  const firebaseConfig = {
     apiKey: "AIzaSyDhFAROrgAiaqjXB-TcCLfVzwnRvdRH3yc",
     authDomain: "homework-87845.firebaseapp.com",
     projectId: "homework-87845",
@@ -40,6 +41,7 @@ const firebaseConfig = {
   /* ── 상태 ─────────────────────────────────────── */
   let currentRole  = localStorage.getItem("hm_role") || null;
   let currentEmoji = localStorage.getItem("hm_emoji") || null;
+  let collapsedGroups = JSON.parse(localStorage.getItem("hm_collapsed") || "{}"); // 그룹 접기 상태 저장
   let zonesData    = [];
   let rouletteActive = false;
 
@@ -72,7 +74,7 @@ const firebaseConfig = {
     localStorage.setItem("hm_emoji", currentEmoji);
     memberModal.classList.add("hidden");
     updateMemberBadge();
-    renderZones(); // 역할이 바뀌면 핀 고정 위치가 달라지므로 재렌더링
+    renderZones();
   };
 
   function updateMemberBadge() {
@@ -86,6 +88,8 @@ const firebaseConfig = {
   /* ── Firestore 실시간 구독 ─────────────────────── */
   onSnapshot(collection(db, ZONES_COL), snap => {
     zonesData = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    // 사용자가 정한 순서(order)대로 정렬. 없으면 0으로 간주
+    zonesData.sort((a, b) => (a.order || 0) - (b.order || 0));
     renderZones();
   });
 
@@ -93,7 +97,6 @@ const firebaseConfig = {
   function daysSince(ts) {
     if (!ts) return null;
     const ms = ts.toDate ? ts.toDate().getTime() : (typeof ts === 'number' ? ts : ts.seconds * 1000);
-    // 한국 시간 기준 자정 리셋을 고려한 간단한 일수 계산
     const today = new Date();
     today.setHours(0,0,0,0);
     const target = new Date(ms);
@@ -109,7 +112,6 @@ const firebaseConfig = {
       return;
     }
 
-    // 그룹핑 로직: 내 당번 먼저, 그 다음 공간별 분류
     const myZones = zonesData.filter(z => z.assignee === currentRole);
     const otherZones = zonesData.filter(z => z.assignee !== currentRole);
 
@@ -125,24 +127,32 @@ const firebaseConfig = {
   }
 
   function renderGroup(title, zones) {
+    const isCollapsed = collapsedGroups[title] || false;
+    
     const groupEl = document.createElement("div");
     groupEl.className = "zone-group";
-    groupEl.innerHTML = `<div class="group-title">${title}</div>`;
+    
+    // 접기/펴기 헤더
+    groupEl.innerHTML = `
+      <div class="group-title" data-title="${title}">
+        <span>${title}</span>
+        <span class="toggle-icon">${isCollapsed ? "◀️" : "🔽"}</span>
+      </div>
+    `;
     
     const listEl = document.createElement("div");
-    listEl.className = "group-list";
+    listEl.className = `group-list ${isCollapsed ? 'hidden' : ''}`;
 
     zones.forEach(zone => {
       const days = daysSince(zone.lastCleaned);
       const cycle = zone.cycle || 3;
       const overdue = days !== null && days > cycle;
-      const history = zone.history || [];
 
       let statusEmoji = "";
       let dayLabel = "기록 없음";
 
       if (days === null) {
-        statusEmoji = ""; // 기록 없을 땐 비워둠
+        statusEmoji = ""; 
       } else if (days === 0) {
         dayLabel = "오늘 완료 😎";
       } else {
@@ -157,19 +167,20 @@ const firebaseConfig = {
       }
 
       const assigneeLabel = zone.assignee && zone.assignee !== '공통' ? `<span class="assignee-badge">${zone.assignee} 당번</span>` : '';
-
-      // 코멘트 처리 (오브젝트 형태)
       const commentsObj = (typeof zone.comments === 'object' && zone.comments !== null) ? zone.comments : {};
       const commentsHtml = Object.entries(commentsObj)
         .map(([role, data]) => `<div class="comment-line"><span class="comment-author">${data.emoji || ''} ${role}:</span> <span class="comment-text">${data.text}</span></div>`)
         .join("");
-      
       const myCommentText = commentsObj[currentRole] ? commentsObj[currentRole].text : '';
 
       const card = document.createElement("div");
+      // data-id를 추가하여 드래그 앤 드롭 시 어느 문서인지 식별
       card.className = `zone-card ${overdue ? "overdue" : ""} ${days===0 ? "cleared" : ""}`;
+      card.dataset.id = zone.id; 
+      
       card.innerHTML = `
         <div class="zone-main">
+          <div class="drag-handle">↕️</div>
           <div class="zone-emoji">${zone.emoji || "🧹"}${statusEmoji}</div>
           <div class="zone-info">
             <div class="zone-name-row">
@@ -206,19 +217,43 @@ const firebaseConfig = {
     groupEl.appendChild(listEl);
     zonesEl.appendChild(groupEl);
 
-    /* 이벤트 위임 */
-    listEl.querySelectorAll(".clear-btn").forEach(btn => {
-      btn.onclick = () => clearZone(btn.dataset.id, btn.dataset.emoji);
-    });
-    listEl.querySelectorAll(".undo-btn").forEach(btn => {
-      btn.onclick = () => undoClear(btn.dataset.id);
-    });
-    listEl.querySelectorAll(".edit-btn").forEach(btn => {
-      btn.onclick = () => openEditModal(btn.dataset.id);
-    });
-    listEl.querySelectorAll(".comment-input").forEach(inp => {
-      inp.onchange = (e) => updateComment(inp.dataset.id, e.target.value);
-    });
+    /* 그룹 접기/펴기 이벤트 */
+    groupEl.querySelector(".group-title").onclick = () => {
+      collapsedGroups[title] = !collapsedGroups[title];
+      localStorage.setItem("hm_collapsed", JSON.stringify(collapsedGroups));
+      renderZones(); 
+    };
+
+    /* 드래그 앤 드롭 (SortableJS) 적용 */
+    if (!isCollapsed) {
+      Sortable.create(listEl, {
+        handle: '.drag-handle', // ↕️ 아이콘이나 영역을 잡고 끌기
+        delay: 200, // 모바일에서 길게 누르기(200ms)로 작동
+        delayOnTouchOnly: true, // PC에서는 딜레이 없이 바로 드래그
+        animation: 150,
+        ghostClass: "sortable-ghost", // 드래그 중인 아이템의 투명도 효과
+        onEnd: async function () {
+          // 드래그가 끝난 후, 이 그룹에 속한 아이템들의 새 순서를 파악
+          const itemEls = Array.from(listEl.querySelectorAll('.zone-card'));
+          
+          // 기존에 이 그룹이 가지고 있던 order 값들을 추출해서 정렬
+          const originalOrders = zones.map(z => z.order || Date.now()).sort((a, b) => a - b);
+          
+          // 화면에 보이는 순서대로 작은 order 값부터 다시 부여 (DB 업데이트)
+          itemEls.forEach((el, index) => {
+            const id = el.dataset.id;
+            const newOrder = originalOrders[index];
+            updateDoc(doc(db, ZONES_COL, id), { order: newOrder });
+          });
+        }
+      });
+    }
+
+    /* 버튼 이벤트 위임 */
+    listEl.querySelectorAll(".clear-btn").forEach(btn => btn.onclick = () => clearZone(btn.dataset.id, btn.dataset.emoji));
+    listEl.querySelectorAll(".undo-btn").forEach(btn => btn.onclick = () => undoClear(btn.dataset.id));
+    listEl.querySelectorAll(".edit-btn").forEach(btn => btn.onclick = () => openEditModal(btn.dataset.id));
+    listEl.querySelectorAll(".comment-input").forEach(inp => inp.onchange = (e) => updateComment(inp.dataset.id, e.target.value));
   }
 
   /* ── 기능 함수들 ──────────────────────────────── */
@@ -240,7 +275,7 @@ const firebaseConfig = {
     if (!zone) return;
     
     let newHistory = [...(zone.history || [])];
-    newHistory.pop(); // 마지막 기록 제거
+    newHistory.pop();
     
     let newLastCleaned = null;
     let newLastWho = "";
@@ -261,15 +296,13 @@ const firebaseConfig = {
     const zone = zonesData.find(z => z.id === id);
     if (!zone) return;
     
-    // 기존 코멘트 객체 가져오기 (없으면 빈 객체)
     const comments = (typeof zone.comments === 'object' && zone.comments !== null) ? { ...zone.comments } : {};
     
     if (text.trim() === "") {
-      delete comments[currentRole]; // 빈칸으로 수정하면 내 코멘트 삭제
+      delete comments[currentRole];
     } else {
-      comments[currentRole] = { emoji: currentEmoji, text: text.trim() }; // 내 역할에 코멘트 저장/덮어쓰기
+      comments[currentRole] = { emoji: currentEmoji, text: text.trim() };
     }
-    
     await updateDoc(doc(db, ZONES_COL, id), { comments });
   }
 
@@ -335,6 +368,7 @@ const firebaseConfig = {
     } else {
       await addDoc(collection(db, ZONES_COL), {
         name, category, emoji, cycle, assignee,
+        order: Date.now(), // 새로 추가된 항목은 맨 밑으로 가도록 현재 시간을 order 값으로 부여
         lastCleaned: null, lastWho: "", history: [], comments: {},
         createdAt: serverTimestamp(),
       });
@@ -395,7 +429,6 @@ const firebaseConfig = {
     renderMemberModal();
   }
 
-  /* 닫기 버튼이 없을 때 배경 클릭으로 닫기 */
   addModal.addEventListener("click", e => {
     if (e.target === addModal) addModal.classList.add("hidden");
   });
@@ -503,12 +536,21 @@ const firebaseConfig = {
 
   .zone-group { margin-top: 16px; }
   .group-title {
-    font-size: .9rem;
-    font-weight: 700;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: .95rem;
+    font-weight: 800;
     color: var(--sub);
     margin-bottom: 8px;
-    padding-left: 4px;
+    padding: 8px 10px;
+    background: #EAECEE;
+    border-radius: 8px;
+    cursor: pointer;
+    user-select: none;
   }
+  .toggle-icon { font-size: .8rem; opacity: 0.7; }
+  
   .group-list {
     display: flex;
     flex-direction: column;
@@ -525,12 +567,24 @@ const firebaseConfig = {
   }
   .zone-card.overdue { border-color: #FADBD8; background: #FDEDEC; }
   .zone-card.cleared { opacity: 0.8; border-color: #D5F5E3; }
+  
+  /* 드래그 중인 카드 이펙트 */
+  .sortable-ghost { opacity: 0.4; border: 2px dashed var(--blue); background: #EBF5FB; }
 
   .zone-main {
     display: flex;
     align-items: center;
     gap: 10px;
   }
+
+  .drag-handle {
+    font-size: 1.2rem;
+    color: #BDC3C7;
+    cursor: grab;
+    padding: 5px;
+    touch-action: none; /* 모바일 스크롤 방지 */
+  }
+  .drag-handle:active { cursor: grabbing; color: var(--blue); }
 
   .zone-emoji { font-size: 1.6rem; flex-shrink: 0; min-width: 32px; text-align:center;}
 
@@ -701,7 +755,6 @@ const firebaseConfig = {
 </head>
 <body>
 
-<!-- 역할 설정 모달 -->
 <div class="modal-overlay hidden" id="member-modal">
   <div class="modal-sheet">
     <p class="modal-title">👋 내 역할과 이모지 선택</p>
@@ -717,7 +770,6 @@ const firebaseConfig = {
   </div>
 </div>
 
-<!-- 구역 추가/수정 모달 -->
 <div class="modal-overlay hidden" id="add-modal">
   <div class="modal-sheet">
     <p class="modal-title" id="modal-title">구역 추가</p>
@@ -753,7 +805,6 @@ const firebaseConfig = {
   </div>
 </div>
 
-<!-- 헤더 -->
 <header>
   <div class="header-row">
     <span class="header-title">🏠 우리 집 청소 매니저</span>
@@ -764,19 +815,15 @@ const firebaseConfig = {
   </div>
 </header>
 
-<!-- 랜덤 미션 -->
 <div class="roulette-wrap">
   <button id="roulette-btn">🎲 오늘 어디 치울까? (랜덤 뽑기)</button>
   <div id="roulette-card" class="hidden"></div>
 </div>
 
-<!-- 구역 목록 -->
 <div id="zones"></div>
 
-<!-- FAB -->
 <button id="fab" title="구역 추가">+</button>
 
-<!-- 이모지 폭죽 레이어 -->
 <div id="confetti-layer"></div>
 
 </body>
