@@ -35,7 +35,8 @@
   /* ── 역할 및 상수 설정 ───────────────────────────── */
   const ROLES = ["아빠", "엄마", "미네"];
   const PENALTY_EMOJIS = ["🙄","😛","😜","🤪","😶","🤨","🤔","🤫","🫣","🫩","😵‍💫","🤢","🤮","😠","😡","🤬","👿","☠️"];
-  const MOON_PHASES = ["🌚", "🌒", "🌓", "🌔", "🌝"]; // 0(텅빔) ~ 4(보름달) 단계
+  // 0:텅빔(🌚) ~ 4:완료(🌝) ~ 7:거의다기움(🌘)
+  const MOON_PHASES = ["🌚", "🌒", "🌓", "🌔", "🌝", "🌖", "🌗", "🌘"]; 
 
   /* ── 상태 ─────────────────────────────────────── */
   let currentRole  = localStorage.getItem("hm_role") || null;
@@ -93,35 +94,37 @@
     renderZones();
   });
 
-  /* ── 달(진척도) 계산 핵심 로직 ────────────────── */
+  /* ── 달(진척도) 계산 핵심 로직 (시간 경과 적용) ──── */
   function getZoneHealth(zone) {
     const now = Date.now();
-    let baseHealth = 4.0;
+    let baseHealth = 0.0;
     let baseTime = now;
 
-    // 언제 마지막으로 달의 위상(Health)이 업데이트 되었는지 확인
     if (zone.healthUpdatedAt !== undefined) {
-      baseHealth = zone.currentHealth !== undefined ? zone.currentHealth : 4.0;
+      baseHealth = zone.currentHealth !== undefined ? zone.currentHealth : 0.0;
       baseTime = zone.healthUpdatedAt.toMillis ? zone.healthUpdatedAt.toMillis() : zone.healthUpdatedAt;
     } else if (zone.lastCleaned) {
-      // 기존 데이터 호환: 마지막 청소일이 있으면 그때 보름달(4.0)이었다고 가정
-      baseHealth = 4.0;
+      baseHealth = 4.0; // 과거 데이터 호환 (완료=🌝)
       baseTime = zone.lastCleaned.toMillis ? zone.lastCleaned.toMillis() : zone.lastCleaned;
     } else {
-      // 아예 새 항목이면 시커먼 달(0.0)부터 시작
-      baseHealth = 0.0;
+      baseHealth = 0.0; // 새 항목 (텅빔=🌚)
       baseTime = zone.createdAt ? (zone.createdAt.toMillis ? zone.createdAt.toMillis() : zone.createdAt) : now;
     }
 
     const daysElapsed = (now - baseTime) / 86400000;
     const cycle = zone.cycle || 1;
-    
-    // 설정한 주기에 맞춰서 달이 점점 깎여나감 (주기가 1일이면 하루에 4.0이 깎임)
-    const decay = (daysElapsed / cycle) * 4.0;
-    let actualHealth = baseHealth - decay;
-    
-    if (actualHealth < 0) actualHealth = 0;
-    if (actualHealth > 4) actualHealth = 4;
+    let actualHealth = baseHealth;
+
+    // 주기에 비례하여 4단계에 걸쳐 깎여나감
+    if (baseHealth >= 4) {
+      // 🌝(4) -> 🌖(5) -> 🌗(6) -> 🌘(7) -> 🌚(8==0) 방향으로 기움
+      actualHealth = baseHealth + (daysElapsed / cycle) * 4.0;
+      if (actualHealth >= 8) actualHealth = 0; 
+    } else {
+      // 🌔(3) 이하일 때도 방치하면 🌚(0)으로 서서히 기움
+      actualHealth = baseHealth - (daysElapsed / cycle) * 4.0;
+      if (actualHealth <= 0) actualHealth = 0; 
+    }
 
     return actualHealth;
   }
@@ -235,25 +238,25 @@
 
     zones.forEach(zone => {
       const actualHealth = getZoneHealth(zone);
-      const moonLevel = Math.round(actualHealth); // 0(🌚) ~ 4(🌝)
+      const moonLevel = Math.floor(actualHealth); // 0(🌚) ~ 7(🌘)
       
       const days = daysSince(zone.lastCleaned);
       const cycle = zone.cycle || 1;
       
-      // 달이 완전히 시커멓게 비었으면(🌚) 연체(Overdue)로 간주!
-      const overdue = (moonLevel === 0);
+      // 달이 완전히 시커멓게 비었으면(🌚 == 0) 연체로 간주!
+      const overdue = (moonLevel === 0 && days !== null && days > cycle);
 
       let statusEmoji = "";
       let dayLabel = "기록 없음";
 
       if (days === null) {
         statusEmoji = ""; 
-      } else if (days === 0) {
+      } else if (days === 0 && moonLevel === 4) {
         dayLabel = "오늘 완료 😎";
       } else {
         dayLabel = `D+${days}`;
-        // 달이 방전된 상태에서 시간이 더 지나면 악마 이모지가 붙음
-        if (days > cycle && overdue) {
+        // 방치되어 🌚가 되고 주기가 넘어가면 연체 이모지 부착
+        if (overdue) {
           let pIndex = (days - cycle) - 1;
           pIndex = Math.max(0, Math.min(pIndex, PENALTY_EMOJIS.length - 1));
           statusEmoji = PENALTY_EMOJIS[pIndex];
@@ -272,6 +275,7 @@
       const hasComments = Object.keys(commentsObj).length > 0;
 
       const card = document.createElement("div");
+      // 🌝 보름달이면서 오늘 치운 경우에만 초록 테두리 표시
       card.className = `zone-card ${overdue ? "overdue" : ""} ${moonLevel===4 && days===0 ? "cleared" : ""}`;
       card.dataset.id = zone.id; 
       
@@ -291,7 +295,7 @@
           </div>
           
           <div class="zone-actions">
-            <button class="action-btn progress-btn" data-id="${zone.id}" data-emoji="${zone.emoji||"✨"}" title="진행도">
+            <button class="action-btn progress-btn" data-id="${zone.id}" data-prog="${moonLevel}" data-days="${days}" data-emoji="${zone.emoji||"✨"}" title="진행도">
               ${MOON_PHASES[moonLevel]}
             </button>
             <button class="action-btn memo-btn ${hasComments ? 'has-memo' : ''}" data-id="${zone.id}" title="메모">💬</button>
@@ -341,57 +345,38 @@
       });
     }
 
-    /* ── 달님(Progress) 버튼 클릭 이벤트 ── */
+    /* ── 🌟 달님 버튼 클릭 이벤트 로직 ── */
     listEl.querySelectorAll(".progress-btn").forEach(btn => {
       btn.onclick = async () => {
         if (!currentRole) { alert("먼저 멤버를 설정해 주세요!"); return; }
         vibrateShort();
         
         const id = btn.dataset.id;
-        const zone = zonesData.find(z => z.id === id);
-        if(!zone) return;
-
-        const actualHealth = getZoneHealth(zone);
-        const currentLevel = Math.round(actualHealth);
-        const now = Date.now();
+        const currentLevel = parseInt(btn.dataset.prog); // 0 ~ 7
+        const days = btn.dataset.days === "null" ? null : parseInt(btn.dataset.days);
+        
+        // 버튼을 누르면 무조건 다음 단계로 1칸 이동 (0->1->2...7->0)
+        let nextLevel = (currentLevel + 1) % 8;
 
         if (currentLevel === 4) {
-          // [취소(Undo) 기능] 보름달(🌝)일 때 누르면 다시 달을 깎음(🌔)
-          let newHistory = [...(zone.history || [])];
-          newHistory.pop(); // 가장 최근 완료 기록 삭제
-          
-          let newLastCleaned = null;
-          let newLastWho = "";
-          if (newHistory.length > 0) {
-            newLastCleaned = Timestamp.fromMillis(newHistory[newHistory.length - 1]);
-            newLastWho = "이전 기록 복구됨";
+          // 🌝 보름달일 때 눌렀다면? -> "취소(되돌리기)" 의도로 판단하고 🌖(5)로 넘김
+          if (days === 0) {
+            undoClear(id); // 오늘 완료한 거라면 완료 기록도 지워줌
+          } else {
+            await updateDoc(doc(db, ZONES_COL, id), {
+              currentHealth: 5.0,
+              healthUpdatedAt: serverTimestamp()
+            });
           }
-          await updateDoc(doc(db, ZONES_COL, id), {
-            currentHealth: 3.0, // 🌔 상태로 되돌림
-            healthUpdatedAt: serverTimestamp(),
-            lastCleaned: newLastCleaned,
-            history: newHistory,
-            lastWho: newLastWho
-          });
+        } else if (nextLevel === 4) {
+          // 🌔(3)에서 눌러서 🌝(4)가 되었다면? -> "정식 완료" 처리!
+          clearZone(id, btn.dataset.emoji);
         } else {
-          // [차오름(Wax) 기능] 🌝가 아닐 때 누르면 달이 1단계 차오름!
-          let newHealth = actualHealth + 1.0;
-          if (newHealth > 4.0) newHealth = 4.0;
-          
-          let updateData = {
-            currentHealth: newHealth,
+          // 그 외의 경우 (차오르거나 기우는 도중) -> 그냥 다음 달 모양으로 업데이트
+          await updateDoc(doc(db, ZONES_COL, id), {
+            currentHealth: nextLevel,
             healthUpdatedAt: serverTimestamp()
-          };
-
-          // 차올라서 보름달(🌝)이 되었다면? 정식 완료 처리!
-          if (Math.round(newHealth) === 4) {
-            updateData.lastCleaned = serverTimestamp();
-            updateData.history = arrayUnion(now);
-            updateData.lastWho = currentEmoji + currentRole;
-            launchConfetti("🌝");
-          }
-
-          await updateDoc(doc(db, ZONES_COL, id), updateData);
+          });
         }
       };
     });
@@ -414,7 +399,42 @@
     });
   }
 
-  /* ── 기타 기능 함수들 ────────────────────────────── */
+  /* ── 기능 함수들 ──────────────────────────────── */
+  async function clearZone(id, emoji) {
+    const now = Date.now();
+    await updateDoc(doc(db, ZONES_COL, id), {
+      lastCleaned: Timestamp.fromMillis(now),
+      lastWho:     `${currentEmoji}${currentRole}`,
+      history:     arrayUnion(now),
+      currentHealth: 4.0, // 보름달 고정
+      healthUpdatedAt: serverTimestamp()
+    });
+    launchConfetti(emoji);
+  }
+
+  async function undoClear(id) {
+    const zone = zonesData.find(z => z.id === id);
+    if (!zone) return;
+    
+    let newHistory = [...(zone.history || [])];
+    newHistory.pop(); // 최근 완료 기록 삭제
+    
+    let newLastCleaned = null;
+    let newLastWho = "";
+    if (newHistory.length > 0) {
+      newLastCleaned = Timestamp.fromMillis(newHistory[newHistory.length - 1]);
+      newLastWho = "이전 기록 복구됨";
+    }
+
+    await updateDoc(doc(db, ZONES_COL, id), {
+      lastCleaned: newLastCleaned,
+      history: newHistory,
+      lastWho: newLastWho,
+      currentHealth: 5.0, // 🌖 상태로 넘김
+      healthUpdatedAt: serverTimestamp()
+    });
+  }
+
   async function updateComment(id, text) {
     if (!currentRole) { alert("먼저 멤버를 설정해 주세요!"); return; }
     const zone = zonesData.find(z => z.id === id);
@@ -503,7 +523,7 @@
     if (rouletteActive || zonesData.length === 0) return;
     const candidates = zonesData.filter(z => {
       const actualHealth = getZoneHealth(z);
-      return Math.round(actualHealth) < 4; // 달이 꽉 안 찬 것들만 뽑음!
+      return Math.floor(actualHealth) !== 4; // 🌝(4)가 아닌 항목만 추천
     });
     const pool = candidates.length ? candidates : zonesData;
     let idx = 0, spins = 0, total = 14;
