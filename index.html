@@ -32,10 +32,13 @@
   const db  = getFirestore(app);
   const ZONES_COL = "zones";
 
-  /* ── 역할 목록 ───────────────────────────── */
+  /* ── 역할 목록 및 이모지 배열 ──────────────────── */
   const ROLES = ["아빠", "엄마", "미네"];
   const PENALTY_EMOJIS = ["🙄","😛","😜","🤪","😶","🤨","🤔","🤫","🫣","🫩","😵‍💫","🤢","🤮","😠","😡","🤬","👿","☠️"];
-  const MOON_PHASES = ["🌑", "🌒", "🌓", "🌔", "🌝"]; // 달 차오르는 단계
+  
+  // 달 위상 (차오를 때 vs 저물 때)
+  const WAXING_MOONS = ["🌑", "🌒", "🌓", "🌔", "🌝"]; // 수동 진행용 (충전)
+  const WANING_MOONS = ["🌝", "🌖", "🌗", "🌘", "🌑"]; // 시간 경과용 (방전)
 
   /* ── 상태 ─────────────────────────────────────── */
   let currentRole  = localStorage.getItem("hm_role") || null;
@@ -206,10 +209,26 @@
       const days = daysSince(zone.lastCleaned);
       const cycle = zone.cycle || 3;
       const overdue = days !== null && days > cycle;
-      const progress = zone.progress || 0; // 달 차오르기 진행도 (0~3)
+      const progress = zone.progress || 0; 
 
       let statusEmoji = "";
       let dayLabel = "기록 없음";
+
+      /* 🌕 달 위상 결정 로직 */
+      let displayMoon = "🌑";
+      
+      if (progress > 0) {
+        // 수동으로 진행 중일 때는 차오르는 달
+        displayMoon = WAXING_MOONS[progress];
+      } else if (days !== null && days < cycle) {
+        // 완료 후 주기가 다가올 때 서서히 저무는 달 (자동 방전)
+        let ratio = days / cycle;
+        let wIndex = Math.floor(ratio * 4); 
+        displayMoon = WANING_MOONS[wIndex]; // days=0 이면 🌝, 커질수록 🌑에 가까워짐
+      } else {
+        // 아예 안 했거나 주기가 넘었으면 시커먼 달
+        displayMoon = "🌑";
+      }
 
       if (days === null) {
         statusEmoji = ""; 
@@ -233,8 +252,10 @@
         .map(([role, data]) => `<div class="comment-line"><span class="comment-author">${data.emoji || ''} ${role}:</span> <span class="comment-text">${data.text}</span></div>`)
         .join("");
       const myCommentText = commentsObj[currentRole] ? commentsObj[currentRole].text : '';
-      
       const hasComments = Object.keys(commentsObj).length > 0;
+
+      // 🌟 완료된 이름 옆에 반짝이는(✨) 스티커 부착
+      const nameSticker = days === 0 ? `<span class="done-sticker">✨</span>` : "";
 
       const card = document.createElement("div");
       card.className = `zone-card ${overdue ? "overdue" : ""} ${days===0 ? "cleared" : ""}`;
@@ -245,7 +266,7 @@
           <div class="zone-emoji">${zone.emoji || "📝"}${statusEmoji}</div>
           <div class="zone-info">
             <div class="zone-name-row">
-              <strong class="zone-name">${zone.name}</strong>
+              <strong class="zone-name">${zone.name} ${nameSticker}</strong>
               ${assigneeLabel}
             </div>
             <div class="zone-meta">
@@ -257,10 +278,8 @@
           
           <div class="zone-actions">
             ${ days === 0 
-              ? `<button class="action-btn undo-btn" data-id="${zone.id}" title="취소">↩️</button>` 
-              : `<button class="action-btn progress-btn" data-id="${zone.id}" data-prog="${progress}" data-emoji="${zone.emoji||"✨"}" title="진행상황">
-                  ${MOON_PHASES[progress]}
-                 </button>`
+              ? `<button class="action-btn progress-btn undo-mode" data-id="${zone.id}" title="취소">${displayMoon}</button>` 
+              : `<button class="action-btn progress-btn" data-id="${zone.id}" data-prog="${progress}" data-emoji="${zone.emoji||"✨"}" title="진행상황">${displayMoon}</button>`
             }
             <button class="action-btn memo-btn ${hasComments ? 'has-memo' : ''}" data-id="${zone.id}" title="메모">💬</button>
             <button class="action-btn edit-btn" data-id="${zone.id}" title="수정">⚙️</button>
@@ -296,7 +315,7 @@
         delayOnTouchOnly: true, 
         animation: 150,
         ghostClass: "sortable-ghost", 
-        filter: ".action-btn, .comment-input", // 버튼과 인풋에서는 드래그 절대 금지
+        filter: ".action-btn, .comment-input", 
         preventOnFilter: false, 
         onEnd: async function () {
           const itemEls = Array.from(listEl.querySelectorAll('.zone-card'));
@@ -310,7 +329,7 @@
     }
   }
 
-  /* ── 🌟 통합 이벤트 위임 (버튼 터치 씹힘 완벽 방지) ── */
+  /* ── 🌟 통합 이벤트 위임 (버튼 터치 씹힘 방지) ── */
   zonesEl.addEventListener("click", async (e) => {
     const target = e.target;
 
@@ -319,9 +338,17 @@
     if (progBtn) {
       e.stopPropagation();
       const id = progBtn.dataset.id;
+
+      // 만약 이미 완료된(🌝) 상태라면 클릭 시 취소(Undo) 처리
+      if (progBtn.classList.contains("undo-mode")) {
+        undoClear(id);
+        return;
+      }
+
       const currentProg = parseInt(progBtn.dataset.prog) || 0;
       vibrateShort();
       
+      // 0~2단계면 차오르고, 3단계(🌔)에서 누르면 완료(🌝) 처리!
       if (currentProg < 3) {
         await updateDoc(doc(db, ZONES_COL, id), { progress: currentProg + 1 });
       } else {
@@ -330,15 +357,7 @@
       return;
     }
 
-    // 2. 취소 버튼 클릭
-    const undoBtn = target.closest(".undo-btn");
-    if (undoBtn) {
-      e.stopPropagation();
-      undoClear(undoBtn.dataset.id);
-      return;
-    }
-
-    // 3. 수정 버튼 클릭
+    // 2. 수정 버튼 클릭
     const editBtn = target.closest(".edit-btn");
     if (editBtn) {
       e.stopPropagation();
@@ -346,7 +365,7 @@
       return;
     }
 
-    // 4. 메모 토글 버튼 클릭
+    // 3. 메모 토글 버튼 클릭
     const memoBtn = target.closest(".memo-btn");
     if (memoBtn) {
       e.stopPropagation();
@@ -363,7 +382,6 @@
     }
   });
 
-  // 코멘트 인풋 감지
   zonesEl.addEventListener("change", (e) => {
     if (e.target.classList.contains("comment-input")) {
       updateComment(e.target.dataset.id, e.target.value);
@@ -379,13 +397,13 @@
       lastCleaned: Timestamp.fromMillis(now),
       lastWho:     `${currentEmoji}${currentRole}`,
       history:     arrayUnion(now),
-      progress:    0 // 다음을 위해 달(🌑) 초기화
+      progress:    0 // 다음을 위해 수동 진행도만 0으로 초기화 (화면엔 날짜 계산으로 🌝가 뜸)
     });
     launchConfetti("🌝");
   }
 
   async function undoClear(id) {
-    if (!confirm("완료 기록을 취소하시겠습니까?")) return;
+    if (!confirm("완료 기록을 취소하시겠습니까? (다시 🌔 상태로 돌아갑니다)")) return;
     const zone = zonesData.find(z => z.id === id);
     if (!zone) return;
     
@@ -403,7 +421,7 @@
       lastCleaned: newLastCleaned,
       history: newHistory,
       lastWho: newLastWho,
-      progress: 3 // 취소 시 🌔 단계로 복귀
+      progress: 3 // 실수로 취소했을 때를 위해 다시 🌔 단계로 복귀
     });
   }
 
@@ -655,7 +673,7 @@
     user-select: none; -webkit-user-select: none;
   }
   .zone-card.overdue { border-color: #FADBD8; background: #FDEDEC; }
-  .zone-card.cleared { opacity: 0.8; border-color: #D5F5E3; }
+  .zone-card.cleared { opacity: 0.8; border-color: #D5F5E3; background: #FAFAFA; }
   .sortable-ghost { opacity: 0.4; border: 2px dashed var(--blue); background: #EBF5FB; }
 
   .zone-main { display: flex; align-items: center; gap: 10px; }
@@ -664,6 +682,20 @@
   .zone-info { flex: 1; display: flex; flex-direction: column; gap: 4px; }
   .zone-name-row { display: flex; align-items: center; gap: 6px; }
   .zone-name { font-size: .95rem; font-weight: 700; }
+  
+  /* 🌟 이름 옆에 붙는 반짝이는 스티커 스타일 */
+  .done-sticker { 
+    font-size: 1.1rem; 
+    display: inline-block; 
+    margin-left: 2px;
+    animation: sparkleAnim 1s ease-in-out infinite alternate; 
+  }
+  
+  @keyframes sparkleAnim {
+    0% { transform: scale(0.85); opacity: 0.6; filter: drop-shadow(0 0 2px rgba(255, 215, 0, 0.4)); }
+    100% { transform: scale(1.2); opacity: 1; filter: drop-shadow(0 0 8px rgba(255, 215, 0, 1)); }
+  }
+
   .assignee-badge {
     font-size: .65rem; background: var(--blue); color: #fff;
     padding: 2px 6px; border-radius: 4px; font-weight: 600;
@@ -688,7 +720,7 @@
   .action-btn:active { transform: scale(0.85); background: #EAECEE; }
   
   .progress-btn { background: #fff; font-size: 1.3rem; } 
-  .undo-btn { background: #D5F5E3; border-color: #A9DFBF; font-size: 1.1rem; }
+  .undo-mode { background: #FDFEFE; } 
   
   /* 코멘트 알림 뱃지 */
   .memo-btn { position: relative; }
