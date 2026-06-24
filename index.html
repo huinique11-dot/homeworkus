@@ -16,7 +16,7 @@
   } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
   /* ====================================================
-     🔑 여기에 본인의 Firebase 프로젝트 설정을 입력하세요.
+     🔑 Firebase 프로젝트 설정
   ==================================================== */
   const firebaseConfig = {
     apiKey: "AIzaSyDhFAROrgAiaqjXB-TcCLfVzwnRvdRH3yc",
@@ -26,7 +26,6 @@
     messagingSenderId: "705292024213",
     appId: "1:705292024213:web:fb7d893c9e4993669f9e9c"
   };
-  /* ==================================================== */
 
   const app = initializeApp(firebaseConfig);
   const db  = getFirestore(app);
@@ -62,6 +61,7 @@
   const addForm       = document.getElementById("add-form");
   const fab           = document.getElementById("fab");
   const confettiLayer = document.getElementById("confetti-layer");
+  const syncTimeEl    = document.getElementById("last-sync-time");
 
   /* ── 멤버 설정 ──────────────────────────── */
   function renderMemberModal() {
@@ -88,11 +88,16 @@
 
   document.getElementById("change-member-btn").onclick = renderMemberModal;
 
-  /* ── Firestore 실시간 구독 ─────────────────────── */
+  /* ── Firestore 실시간 구독 및 동기화 시간 업데이트 ── */
   onSnapshot(collection(db, ZONES_COL), snap => {
     zonesData = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     zonesData.sort((a, b) => (a.order || 0) - (b.order || 0));
     renderZones();
+    
+    // 🌟 데이터가 바뀔 때마다 하단에 최근 동기화 시각 업데이트
+    const now = new Date();
+    const timeStr = now.toLocaleDateString('ko-KR') + ' ' + now.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    syncTimeEl.innerText = `🔄 최근 동기화: ${timeStr}`;
   });
 
   /* ── 경과일 계산 ──────────────────────────────── */
@@ -208,40 +213,40 @@
       const days = daysSince(zone.lastCleaned);
       const cycle = zone.cycle || 3;
       const overdue = days !== null && days > cycle;
-      const progress = zone.progress; // null 이면 자동 방전 모드
-
+      
+      // DB에 저장된 진행도(0~7)를 가져옴
+      let moonIndex = zone.progress || 0; 
       let displayMoon = "🌑";
       let statusEmoji = "";
       let dayLabel = "기록 없음";
 
-      /* 🌕 달 위상 결정 로직 */
-      if (progress !== null && progress !== undefined) {
-        // 수동으로 누른 기록이 있으면 그 위상 유지
-        displayMoon = ALL_MOONS[progress];
-      } else if (days !== null && days < cycle) {
-        // 완료 후 시간이 흐르며 자동으로 저무는 달 (방전)
-        let ratio = days / cycle;
-        let wIndex = Math.floor(ratio * 4); // 0,1,2,3
-        const waningArr = ["🌝", "🌖", "🌗", "🌘"];
-        displayMoon = waningArr[wIndex];
-      } else {
-        // 완전 방전 (초기화)
-        displayMoon = "🌑";
+      /* 🌕 자동 방전 및 달 위상 계산 로직 */
+      if (moonIndex === 4 && days !== null && days > 0) {
+        // 보름달(완료) 상태로 날짜가 지났다면 서서히 방전시킴
+        if (days >= cycle) {
+          moonIndex = 0; // 주기 초과 시 완전 방전
+        } else {
+          let ratio = days / cycle;
+          let offset = Math.floor(ratio * 4); // 0, 1, 2, 3
+          // 🌝(4) -> 🌖(5) -> 🌗(6) -> 🌘(7)
+          moonIndex = Math.min(4 + offset, 7);
+        }
       }
+      displayMoon = ALL_MOONS[moonIndex];
 
-      /* 상태(반짝이/페널티) 결정 로직 */
+      /* 🌟 상태(반짝이/페널티) 결정 로직 */
       if (days === null) {
         statusEmoji = ""; 
       } else if (days === 0) {
         dayLabel = "오늘 완료 😎";
-        // 🌟 완료 시 페널티 자리에 반짝이는 이모지 부착!
+        // 완료 시 페널티 자리에 반짝이는 이모지 부착!
         statusEmoji = `<span class="done-sticker">✨</span>`;
       } else {
         dayLabel = `D+${days}`;
         if (overdue) {
           let pIndex = (days - cycle) - 1;
           pIndex = Math.max(0, Math.min(pIndex, PENALTY_EMOJIS.length - 1));
-          statusEmoji = PENALTY_EMOJIS[pIndex];
+          statusEmoji = `<span class="penalty-emoji">${PENALTY_EMOJIS[pIndex]}</span>`;
         } else {
           statusEmoji = "";
         }
@@ -335,19 +340,22 @@
       e.stopPropagation();
       const id = progBtn.dataset.id;
       const currentDisplayMoon = progBtn.dataset.moon; 
-      const currentIndex = ALL_MOONS.indexOf(currentDisplayMoon);
-      const nextIndex = (currentIndex + 1) % 8; // 무조건 다음 위상으로 넘어감!
+      let currentIndex = ALL_MOONS.indexOf(currentDisplayMoon);
+      if (currentIndex === -1) currentIndex = 0;
+      
+      // 누르면 무조건 다음 위상으로 넘어감 (8단계 무한 반복)
+      const nextIndex = (currentIndex + 1) % 8; 
 
       vibrateShort();
       
       if (nextIndex === 4) {
-        // 🌔(3) -> 🌝(4): 달이 꽉 차면 완료!
+        // 🌔(3)에서 눌러서 🌝(4) 보름달이 되면 -> 완료 처리!
         clearZone(id, progBtn.dataset.emoji);
       } else if (currentIndex === 4) {
-        // 🌝(4) -> 🌖(5): 보름달에서 누르면 경고창 없이 취소되고 다음 위상으로!
+        // 🌝(4) 상태에서 누르면 -> 🌖(5) 하현달로 넘어가면서 조용히 취소 처리!
         undoClearSilent(id, nextIndex);
       } else {
-        // 그 외엔 과학적으로 위상만 변경
+        // 나머지 위상은 DB에 위상 번호만 착실하게 업데이트
         updateDoc(doc(db, ZONES_COL, id), { progress: nextIndex });
       }
       return;
@@ -387,13 +395,12 @@
   /* ── 기능 함수들 ──────────────────────────────── */
   async function clearZone(id, emoji) {
     if (!currentRole) { alert("먼저 상단에서 내 역할을 선택해 주세요!"); return; }
-    vibrateShort();
     const now = Date.now();
     await updateDoc(doc(db, ZONES_COL, id), {
       lastCleaned: Timestamp.fromMillis(now),
       lastWho:     `${currentEmoji}${currentRole}`,
       history:     arrayUnion(now),
-      progress:    null // 수동 진행을 초기화하면, 화면엔 '오늘완료'에 맞춰 🌝가 자동으로 뜸
+      progress:    4 // 보름달(🌝) 단계 고정
     });
     launchConfetti("🌝");
   }
@@ -403,7 +410,7 @@
     if (!zone) return;
     
     let newHistory = [...(zone.history || [])];
-    newHistory.pop(); // 최근 완료 기록 하나 제거
+    newHistory.pop(); 
     
     let newLastCleaned = null;
     let newLastWho = "";
@@ -416,7 +423,7 @@
       lastCleaned: newLastCleaned,
       history: newHistory,
       lastWho: newLastWho,
-      progress: nextProgress // 🌝에서 눌렀으니 🌖(5) 상태로 넘어감
+      progress: nextProgress // 🌖(5) 상태로 넘어감 (조용히 취소)
     });
   }
 
@@ -498,7 +505,7 @@
       await addDoc(collection(db, ZONES_COL), {
         name, category, emoji, cycle, assignee,
         order: Date.now(),
-        lastCleaned: null, lastWho: "", history: [], comments: {}, progress: null,
+        lastCleaned: null, lastWho: "", history: [], comments: {}, progress: 0,
         createdAt: serverTimestamp(),
       });
     }
@@ -681,6 +688,11 @@
     animation: sparkleAnim 1s ease-in-out infinite alternate; 
   }
   
+  .penalty-emoji {
+    display: inline-block;
+    margin-left: 4px;
+  }
+  
   @keyframes sparkleAnim {
     0% { transform: scale(0.85); opacity: 0.6; filter: drop-shadow(0 0 2px rgba(255, 215, 0, 0.4)); }
     100% { transform: scale(1.2); opacity: 1; filter: drop-shadow(0 0 8px rgba(255, 215, 0, 1)); }
@@ -747,6 +759,16 @@
   /* ── Empty State ─────────────────────────────── */
   .empty-state { text-align: center; padding: 50px 20px; color: var(--sub); }
   .empty-icon { font-size: 3rem; display: block; margin-bottom: 12px; }
+
+  /* ── 🔄 동기화 시간 표시 ─────────────────────── */
+  .sync-time {
+    text-align: center;
+    font-size: 0.75rem;
+    color: #BDC3C7;
+    margin-top: 10px;
+    margin-bottom: 30px;
+    font-weight: 600;
+  }
 
   /* ── FAB ──────────────────────────────────────── */
   #fab {
@@ -871,6 +893,8 @@
 </div>
 
 <div id="zones"></div>
+
+<div id="last-sync-time" class="sync-time"></div>
 
 <button id="fab" title="항목 추가">+</button>
 
