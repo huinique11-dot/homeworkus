@@ -3,34 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-<meta name="apple-mobile-web-app-capable" content="yes" />
-<meta name="apple-mobile-web-app-status-bar-style" content="default" />
-<meta name="apple-mobile-web-app-title" content="우리집 매니졀" />
-<title>🤖 우리집 매니졀</title>
-
-<script>
-  const canvas = document.createElement('canvas');
-  canvas.width = 192;
-  canvas.height = 192;
-  const ctx = canvas.getContext('2d');
-  ctx.fillStyle = '#FFFFFF';
-  ctx.fillRect(0, 0, 192, 192);
-  ctx.font = '120px sans-serif';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText('🤖', 96, 105);
-  const iconUrl = canvas.toDataURL('image/png');
-
-  const linkFavicon = document.createElement('link');
-  linkFavicon.rel = 'icon';
-  linkFavicon.href = iconUrl;
-  document.head.appendChild(linkFavicon);
-
-  const linkApple = document.createElement('link');
-  linkApple.rel = 'apple-touch-icon';
-  linkApple.href = iconUrl;
-  document.head.appendChild(linkApple);
-</script>
+<title>📋 우리 집 매니저</title>
 
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
 
@@ -39,7 +12,7 @@
   import {
     getFirestore, collection, doc,
     addDoc, updateDoc, deleteDoc,
-    onSnapshot, arrayUnion, serverTimestamp
+    onSnapshot, arrayUnion, serverTimestamp, Timestamp
   } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
   /* ====================================================
@@ -59,27 +32,26 @@
   const db  = getFirestore(app);
   const ZONES_COL = "zones";
 
+  /* ── 역할 목록 ───────────────────────────── */
   const ROLES = ["아빠", "엄마", "미네"];
   const PENALTY_EMOJIS = ["🙄","😛","😜","🤪","😶","🤨","🤔","🤫","🫣","🫩","😵‍💫","🤢","🤮","😠","😡","🤬","👿","☠️"];
-  const MOON_PHASES = ["🌚", "🌒", "🌓", "🌔", "🌝", "🌖", "🌗", "🌘"];
+  const MOON_PHASES = ["🌑", "🌒", "🌓", "🌔", "🌝"]; // 달 차오르는 단계
 
+  /* ── 상태 ─────────────────────────────────────── */
   let currentRole  = localStorage.getItem("hm_role") || null;
   let currentEmoji = localStorage.getItem("hm_emoji") || null;
-  let collapsedGroups = JSON.parse(localStorage.getItem("hm_collapsed") || "{}");
+  let collapsedGroups = JSON.parse(localStorage.getItem("hm_collapsed") || "{}"); 
   let openCommentIds = new Set();
   let zonesData    = [];
   let rouletteActive = false;
 
-  // 깜빡임 방지용 변수들
-  let sortableInstances = [];
-  let renderTimer = null;
-
+  /* ── DOM 참조 ─────────────────────────────────── */
   const memberModal   = document.getElementById("member-modal");
   const roleSelect    = document.getElementById("inp-role");
   const profileEmoji  = document.getElementById("inp-profile-emoji");
   const saveMemberBtn = document.getElementById("save-member-btn");
   const memberBadge   = document.getElementById("member-badge");
-
+  
   const kingBanner    = document.getElementById("king-banner");
   const rouletteBtn   = document.getElementById("roulette-btn");
   const rouletteCard  = document.getElementById("roulette-card");
@@ -88,7 +60,6 @@
   const addForm       = document.getElementById("add-form");
   const fab           = document.getElementById("fab");
   const confettiLayer = document.getElementById("confetti-layer");
-  const footerEl      = document.getElementById("last-updated-footer");
 
   /* ── 멤버 설정 ──────────────────────────── */
   function renderMemberModal() {
@@ -115,57 +86,17 @@
 
   document.getElementById("change-member-btn").onclick = renderMemberModal;
 
-  /* ── Firestore 실시간 구독 (Debounce 적용하여 깜빡임 제거) ── */
+  /* ── Firestore 실시간 구독 ─────────────────────── */
   onSnapshot(collection(db, ZONES_COL), snap => {
     zonesData = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     zonesData.sort((a, b) => (a.order || 0) - (b.order || 0));
-    
-    // 데이터가 쏟아져 들어올 때 한 번만 모아서 렌더링
-    if (renderTimer) clearTimeout(renderTimer);
-    renderTimer = setTimeout(() => {
-      renderZones();
-    }, 40); 
+    renderZones();
   });
-
-  /* ── 달 위상 계산 로직 ──────────────────────────────── */
-  function getDisplayPhase(zone) {
-    const now = Date.now();
-    let basePhase = parseInt(zone.currentPhase);
-    if (isNaN(basePhase)) basePhase = 0;
-
-    let baseTime = zone.healthUpdatedAt || now;
-    if (typeof baseTime !== 'number') {
-      baseTime = baseTime.toMillis ? baseTime.toMillis() : now;
-    }
-
-    const days = (now - baseTime) / 86400000;
-    const cycle = Math.max(0.1, parseFloat(zone.cycle) || 1);
-    const decay = (days / cycle) * 4.0;
-
-    if (basePhase === 0) return 0;
-
-    if (basePhase >= 4) {
-      if (decay >= 4) return 0;
-      const p = basePhase + decay;
-      if (p >= 8) return 0;
-      return Math.min(7, Math.floor(p));
-    } else {
-      const p = basePhase - decay;
-      if (p <= 0) return 0;
-      return Math.max(1, Math.floor(p));
-    }
-  }
 
   /* ── 경과일 계산 ──────────────────────────────── */
   function daysSince(ts) {
     if (!ts) return null;
-    let ms;
-    if (typeof ts === 'number') ms = ts;
-    else if (ts.toDate) ms = ts.toDate().getTime();
-    else if (ts.toMillis) ms = ts.toMillis();
-    else if (ts.seconds) ms = ts.seconds * 1000;
-    else return null;
-    
+    const ms = ts.toDate ? ts.toDate().getTime() : (typeof ts === 'number' ? ts : ts.seconds * 1000);
     const today = new Date();
     today.setHours(0,0,0,0);
     const target = new Date(ms);
@@ -173,56 +104,41 @@
     return Math.floor((today - target) / 86400000);
   }
 
-  /* ── 하단 날짜 업데이트 ────────────────────────── */
-  function updateFooterTime() {
-    const now = new Date();
-    const dateStr = now.toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric' });
-    const timeStr = now.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
-    footerEl.textContent = `마지막 업데이트: ${dateStr} ${timeStr}`;
-  }
-
   /* ── 오늘의 활동왕 계산 ────────────────────────── */
   function updateKingBanner() {
     let counts = {};
-    let emojiMap = {};
-    ROLES.forEach(r => { counts[r] = 0; emojiMap[r] = "👑"; });
+    ROLES.forEach(r => counts[r] = 0);
     let maxCount = 0;
     let kingRole = null;
+    let kingEmoji = "👑";
 
     zonesData.forEach(z => {
-      if (daysSince(z.lastCleaned) === 0 && z.lastWho) {
+      if(daysSince(z.lastCleaned) === 0 && z.lastWho) {
         ROLES.forEach(r => {
-          if (z.lastWho.includes(r)) {
+          if(z.lastWho.includes(r)) {
             counts[r]++;
-            const extracted = z.lastWho.replace(r, '').trim();
-            if (extracted) emojiMap[r] = extracted;
-            if (counts[r] > maxCount) {
+            if(counts[r] > maxCount) {
               maxCount = counts[r];
               kingRole = r;
+              kingEmoji = z.lastWho.replace(r, '').trim() || "👑";
             }
           }
         });
       }
     });
 
-    if (maxCount > 0 && kingRole) {
-      kingBanner.innerHTML = `🏆 오늘의 활동왕: <strong>${emojiMap[kingRole]} ${kingRole}</strong> (${maxCount}개 완료!)`;
+    if(maxCount > 0) {
+      kingBanner.innerHTML = `🏆 오늘의 활동왕: <strong>${kingEmoji} ${kingRole}</strong> (${maxCount}개 완료!)`;
       kingBanner.classList.remove("hidden");
     } else {
       kingBanner.classList.add("hidden");
     }
   }
 
-  /* ── 리스트 렌더링 (DocumentFragment 적용하여 깜빡임 완벽 제거) ── */
-  function destroyAllSortables() {
-    sortableInstances.forEach(s => { try { s.destroy(); } catch(_) {} });
-    sortableInstances = [];
-  }
-
+  /* ── 리스트 렌더링 ─────────────────────────── */
   function renderZones() {
-    destroyAllSortables();
-    updateKingBanner();
-    updateFooterTime();
+    zonesEl.innerHTML = "";
+    updateKingBanner(); 
 
     if (zonesData.length === 0) {
       zonesEl.innerHTML = `<div class="empty-state"><span class="empty-icon">📝</span><p>아직 항목이 없어요.<br>+ 버튼으로 할 일을 추가해 보세요!</p></div>`;
@@ -233,7 +149,9 @@
     const otherZones = zonesData.filter(z => z.assignee !== currentRole);
 
     let renderGroups = [];
-    if (myZones.length > 0) renderGroups.push({ title: "📌 내 당번 항목", zones: myZones });
+    if (myZones.length > 0) {
+      renderGroups.push({ title: "📌 내 당번 항목", zones: myZones });
+    }
 
     const categories = [...new Set(otherZones.map(z => z.category || "기타"))];
     categories.forEach(cat => {
@@ -250,20 +168,9 @@
       return idxA - idxB;
     });
 
-    // 가상 돔(DocumentFragment)을 사용해 한 번에 화면에 렌더링
-    const fragment = document.createDocumentFragment();
-    const sortableTargets = []; 
+    renderGroups.forEach(group => renderGroupUI(group.title, group.zones));
 
-    renderGroups.forEach(group => {
-      const groupEl = createGroupUI(group.title, group.zones, sortableTargets);
-      fragment.appendChild(groupEl);
-    });
-
-    zonesEl.innerHTML = "";
-    zonesEl.appendChild(fragment);
-
-    // DOM이 완전히 그려진 뒤에 안전하게 Sortable 부착 (Layout Thrashing 방지)
-    const groupSortable = Sortable.create(zonesEl, {
+    Sortable.create(zonesEl, {
       handle: '.group-drag-handle',
       animation: 150,
       delay: 150,
@@ -274,35 +181,14 @@
         localStorage.setItem('hm_group_order', JSON.stringify(titles));
       }
     });
-    sortableInstances.push(groupSortable);
-
-    sortableTargets.forEach(target => {
-      const s = Sortable.create(target.el, {
-        delay: 250,
-        delayOnTouchOnly: true,
-        animation: 150,
-        ghostClass: "sortable-ghost",
-        // ✅ 버튼 터치를 막지 않도록 예외 처리 구역 설정
-        filter: ".zone-actions, .zone-comments, button, input", 
-        preventOnFilter: false,
-        onEnd: async function () {
-          const itemEls = Array.from(target.el.querySelectorAll('.zone-card'));
-          const originalOrders = target.zones.map(z => z.order || Date.now()).sort((a, b) => a - b);
-          itemEls.forEach((el, index) => {
-            const id = el.dataset.id;
-            updateDoc(doc(db, ZONES_COL, id), { order: originalOrders[index] });
-          });
-        }
-      });
-      sortableInstances.push(s);
-    });
   }
 
-  function createGroupUI(title, zones, sortableTargets) {
+  function renderGroupUI(title, zones) {
     const isCollapsed = collapsedGroups[title] || false;
+    
     const groupEl = document.createElement("div");
     groupEl.className = "zone-group";
-
+    
     groupEl.innerHTML = `
       <div class="group-title" data-title="${title}">
         <div style="display:flex; align-items:center;">
@@ -312,22 +198,22 @@
         <span class="toggle-icon">${isCollapsed ? "◀️" : "🔽"}</span>
       </div>
     `;
-
+    
     const listEl = document.createElement("div");
     listEl.className = `group-list ${isCollapsed ? 'hidden' : ''}`;
 
     zones.forEach(zone => {
-      const moonLevel = getDisplayPhase(zone);
       const days = daysSince(zone.lastCleaned);
-      const cycle = Math.max(0.1, parseFloat(zone.cycle) || 1);
-      const overdue = (moonLevel === 0 && days !== null && days > cycle);
+      const cycle = zone.cycle || 3;
+      const overdue = days !== null && days > cycle;
+      const progress = zone.progress || 0; // 달 차오르기 진행도 (0~3)
 
       let statusEmoji = "";
       let dayLabel = "기록 없음";
 
       if (days === null) {
-        statusEmoji = "";
-      } else if (days === 0 && moonLevel === 4) {
+        statusEmoji = ""; 
+      } else if (days === 0) {
         dayLabel = "오늘 완료 😎";
       } else {
         dayLabel = `D+${days}`;
@@ -347,12 +233,13 @@
         .map(([role, data]) => `<div class="comment-line"><span class="comment-author">${data.emoji || ''} ${role}:</span> <span class="comment-text">${data.text}</span></div>`)
         .join("");
       const myCommentText = commentsObj[currentRole] ? commentsObj[currentRole].text : '';
+      
       const hasComments = Object.keys(commentsObj).length > 0;
 
       const card = document.createElement("div");
-      card.className = `zone-card ${overdue ? "overdue" : ""} ${moonLevel===4 && days===0 ? "cleared" : ""}`;
-      card.dataset.id = zone.id;
-
+      card.className = `zone-card ${overdue ? "overdue" : ""} ${days===0 ? "cleared" : ""}`;
+      card.dataset.id = zone.id; 
+      
       card.innerHTML = `
         <div class="zone-main">
           <div class="zone-emoji">${zone.emoji || "📝"}${statusEmoji}</div>
@@ -362,21 +249,24 @@
               ${assigneeLabel}
             </div>
             <div class="zone-meta">
-              주기 ${cycle}일 <span class="divider">|</span>
-              <span class="${overdue ? "text-red" : (moonLevel===4 && days===0 ? "text-green" : "")} bold">${dayLabel}</span>
+              목표 ${cycle}일 <span class="divider">|</span> 
+              <span class="${overdue ? "text-red" : (days===0 ? "text-green" : "")} bold">${dayLabel}</span>
               ${zone.lastWho ? `<span class="last-who">(${zone.lastWho})</span>` : ""}
             </div>
           </div>
-
+          
           <div class="zone-actions">
-            <button class="action-btn progress-btn" data-id="${zone.id}" data-prog="${moonLevel}" data-days="${days}" data-emoji="${zone.emoji||"✨"}" title="진행도">
-              ${MOON_PHASES[moonLevel]}
-            </button>
+            ${ days === 0 
+              ? `<button class="action-btn undo-btn" data-id="${zone.id}" title="취소">↩️</button>` 
+              : `<button class="action-btn progress-btn" data-id="${zone.id}" data-prog="${progress}" data-emoji="${zone.emoji||"✨"}" title="진행상황">
+                  ${MOON_PHASES[progress]}
+                 </button>`
+            }
             <button class="action-btn memo-btn ${hasComments ? 'has-memo' : ''}" data-id="${zone.id}" title="메모">💬</button>
             <button class="action-btn edit-btn" data-id="${zone.id}" title="수정">⚙️</button>
           </div>
         </div>
-
+        
         <div class="zone-comments ${openCommentIds.has(zone.id) ? '' : 'hidden'}" id="comments-${zone.id}">
           ${commentsHtml ? `<div class="comments-list">${commentsHtml}</div>` : ""}
           <div class="comment-input-wrap">
@@ -385,96 +275,150 @@
           </div>
         </div>
       `;
+
       listEl.appendChild(card);
     });
 
     groupEl.appendChild(listEl);
+    zonesEl.appendChild(groupEl);
 
-    /* 이벤트 위임 및 바인딩 */
     const titleHeader = groupEl.querySelector(".group-title");
     titleHeader.addEventListener('click', (e) => {
-      if(e.target.classList.contains('group-drag-handle')) return;
+      if(e.target.classList.contains('group-drag-handle')) return; 
       collapsedGroups[title] = !collapsedGroups[title];
       localStorage.setItem("hm_collapsed", JSON.stringify(collapsedGroups));
-      renderZones();
+      renderZones(); 
     });
 
     if (!isCollapsed) {
-      sortableTargets.push({ el: listEl, zones: zones });
+      Sortable.create(listEl, {
+        delay: 250, 
+        delayOnTouchOnly: true, 
+        animation: 150,
+        ghostClass: "sortable-ghost", 
+        filter: ".action-btn, .comment-input", // 버튼과 인풋에서는 드래그 절대 금지
+        preventOnFilter: false, 
+        onEnd: async function () {
+          const itemEls = Array.from(listEl.querySelectorAll('.zone-card'));
+          const originalOrders = zones.map(z => z.order || Date.now()).sort((a, b) => a - b);
+          itemEls.forEach((el, index) => {
+            const id = el.dataset.id;
+            updateDoc(doc(db, ZONES_COL, id), { order: originalOrders[index] });
+          });
+        }
+      });
     }
-
-    /* ── 달님 버튼 클릭 핵심 로직 보완 ── */
-    listEl.querySelectorAll(".progress-btn").forEach(btn => {
-      btn.onclick = async (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-
-        if (!currentRole) { alert("먼저 멤버를 설정해 주세요!"); return; }
-        vibrateShort();
-
-        const id = btn.dataset.id;
-        const zone = zonesData.find(z => z.id === id);
-        if(!zone) return;
-
-        const currentDisplayPhase = parseInt(btn.dataset.prog) || 0;
-        const days = btn.dataset.days === "null" ? null : parseInt(btn.dataset.days);
-        const now = Date.now();
-
-        // 시각적으로 터치 즉시 피드백
-        btn.style.transform = "scale(0.85)";
-        setTimeout(() => { btn.style.transform = "scale(1)"; }, 150);
-
-        const nextPhase = (currentDisplayPhase + 1) % 8;
-
-        let updateData = {
-          currentPhase: nextPhase,
-          healthUpdatedAt: now
-        };
-
-        if (nextPhase === 4) {
-          updateData.lastCleaned = now;
-          updateData.history = arrayUnion(now);
-          updateData.lastWho = currentEmoji + currentRole;
-          launchConfetti(btn.dataset.emoji || "🌝");
-        } else if (currentDisplayPhase === 4 && nextPhase === 5) {
-          // 보름달 지나침 -> 위상만 전진
-        } else if (nextPhase === 0) {
-          updateData.lastCleaned = null;
-          updateData.lastWho = "";
-        }
-
-        await updateDoc(doc(db, ZONES_COL, id), updateData);
-      };
-    });
-
-    listEl.querySelectorAll(".edit-btn").forEach(btn => btn.onclick = () => openEditModal(btn.dataset.id));
-    listEl.querySelectorAll(".comment-input").forEach(inp => inp.onchange = (e) => updateComment(inp.dataset.id, e.target.value));
-    
-    listEl.querySelectorAll(".memo-btn").forEach(btn => {
-      btn.onclick = () => {
-        const id = btn.dataset.id;
-        const commentBlock = document.getElementById(`comments-${id}`);
-        if (openCommentIds.has(id)) {
-          openCommentIds.delete(id);
-          commentBlock.classList.add("hidden");
-        } else {
-          openCommentIds.add(id);
-          commentBlock.classList.remove("hidden");
-        }
-      };
-    });
-
-    return groupEl;
   }
 
-  /* ── 코멘트 및 삭제 함수들 ────────────────────────────── */
-  async function updateComment(id, text) {
-    if (!currentRole) { alert("먼저 멤버를 설정해 주세요!"); return; }
+  /* ── 🌟 통합 이벤트 위임 (버튼 터치 씹힘 완벽 방지) ── */
+  zonesEl.addEventListener("click", async (e) => {
+    const target = e.target;
+
+    // 1. 달(진행도) 버튼 클릭
+    const progBtn = target.closest(".progress-btn");
+    if (progBtn) {
+      e.stopPropagation();
+      const id = progBtn.dataset.id;
+      const currentProg = parseInt(progBtn.dataset.prog) || 0;
+      vibrateShort();
+      
+      if (currentProg < 3) {
+        await updateDoc(doc(db, ZONES_COL, id), { progress: currentProg + 1 });
+      } else {
+        clearZone(id, progBtn.dataset.emoji);
+      }
+      return;
+    }
+
+    // 2. 취소 버튼 클릭
+    const undoBtn = target.closest(".undo-btn");
+    if (undoBtn) {
+      e.stopPropagation();
+      undoClear(undoBtn.dataset.id);
+      return;
+    }
+
+    // 3. 수정 버튼 클릭
+    const editBtn = target.closest(".edit-btn");
+    if (editBtn) {
+      e.stopPropagation();
+      openEditModal(editBtn.dataset.id);
+      return;
+    }
+
+    // 4. 메모 토글 버튼 클릭
+    const memoBtn = target.closest(".memo-btn");
+    if (memoBtn) {
+      e.stopPropagation();
+      const id = memoBtn.dataset.id;
+      const commentBlock = document.getElementById(`comments-${id}`);
+      if (openCommentIds.has(id)) {
+        openCommentIds.delete(id);
+        commentBlock.classList.add("hidden");
+      } else {
+        openCommentIds.add(id);
+        commentBlock.classList.remove("hidden");
+      }
+      return;
+    }
+  });
+
+  // 코멘트 인풋 감지
+  zonesEl.addEventListener("change", (e) => {
+    if (e.target.classList.contains("comment-input")) {
+      updateComment(e.target.dataset.id, e.target.value);
+    }
+  });
+
+  /* ── 기능 함수들 ──────────────────────────────── */
+  async function clearZone(id, emoji) {
+    if (!currentRole) { alert("먼저 상단에서 내 역할을 선택해 주세요!"); return; }
+    vibrateShort();
+    const now = Date.now();
+    await updateDoc(doc(db, ZONES_COL, id), {
+      lastCleaned: Timestamp.fromMillis(now),
+      lastWho:     `${currentEmoji}${currentRole}`,
+      history:     arrayUnion(now),
+      progress:    0 // 다음을 위해 달(🌑) 초기화
+    });
+    launchConfetti("🌝");
+  }
+
+  async function undoClear(id) {
+    if (!confirm("완료 기록을 취소하시겠습니까?")) return;
     const zone = zonesData.find(z => z.id === id);
     if (!zone) return;
+    
+    let newHistory = [...(zone.history || [])];
+    newHistory.pop();
+    
+    let newLastCleaned = null;
+    let newLastWho = "";
+    if (newHistory.length > 0) {
+      newLastCleaned = Timestamp.fromMillis(newHistory[newHistory.length - 1]);
+      newLastWho = "이전 기록 복구됨";
+    }
+
+    await updateDoc(doc(db, ZONES_COL, id), {
+      lastCleaned: newLastCleaned,
+      history: newHistory,
+      lastWho: newLastWho,
+      progress: 3 // 취소 시 🌔 단계로 복귀
+    });
+  }
+
+  async function updateComment(id, text) {
+    if (!currentRole) { alert("먼저 상단에서 역할을 설정해 주세요!"); return; }
+    const zone = zonesData.find(z => z.id === id);
+    if (!zone) return;
+    
     const comments = (typeof zone.comments === 'object' && zone.comments !== null) ? { ...zone.comments } : {};
-    if (text.trim() === "") delete comments[currentRole];
-    else comments[currentRole] = { emoji: currentEmoji, text: text.trim() };
+    
+    if (text.trim() === "") {
+      delete comments[currentRole];
+    } else {
+      comments[currentRole] = { emoji: currentEmoji, text: text.trim() };
+    }
     await updateDoc(doc(db, ZONES_COL, id), { comments });
   }
 
@@ -486,13 +430,14 @@
 
   /* ── 추가/수정 모달 ────────────────────────────── */
   let editingId = null;
+
   fab.onclick = () => openAddModal();
 
   function openAddModal() {
     editingId = null;
     addForm.reset();
     document.getElementById("modal-title").textContent = "항목 추가";
-    document.getElementById("submit-btn").textContent = "추가하기";
+    document.getElementById("submit-label").textContent = "추가하기";
     document.getElementById("btn-delete-zone").classList.add("hidden");
     populateAssigneeSelect();
     addModal.classList.remove("hidden");
@@ -503,21 +448,21 @@
     if (!zone) return;
     editingId = id;
     populateAssigneeSelect();
-    document.getElementById("inp-name").value     = zone.name     || "";
+    document.getElementById("inp-name").value  = zone.name  || "";
     document.getElementById("inp-category").value = zone.category || "";
-    document.getElementById("inp-emoji").value    = zone.emoji    || "";
-    document.getElementById("inp-cycle").value    = zone.cycle    || 1;
+    document.getElementById("inp-emoji").value = zone.emoji || "";
+    document.getElementById("inp-cycle").value = zone.cycle || 3;
     document.getElementById("inp-assignee").value = zone.assignee || "공통";
-
+    
     document.getElementById("modal-title").textContent = "항목 수정";
-    document.getElementById("submit-btn").textContent = "저장하기";
+    document.getElementById("submit-label").textContent = "저장하기";
     document.getElementById("btn-delete-zone").classList.remove("hidden");
     addModal.classList.remove("hidden");
   }
 
   function populateAssigneeSelect() {
     const sel = document.getElementById("inp-assignee");
-    sel.innerHTML = `<option value="공통">공통 (모두 함께)</option>` +
+    sel.innerHTML = `<option value="공통">공통 (모두 함께)</option>` + 
                     ROLES.map(r => `<option value="${r}">${r}</option>`).join("");
   }
 
@@ -540,8 +485,8 @@
       await addDoc(collection(db, ZONES_COL), {
         name, category, emoji, cycle, assignee,
         order: Date.now(),
-        lastCleaned: null, lastWho: "", history: [], comments: {}, currentPhase: 0,
-        createdAt: Date.now(),
+        lastCleaned: null, lastWho: "", history: [], comments: {}, progress: 0,
+        createdAt: serverTimestamp(),
       });
     }
     addForm.reset();
@@ -550,15 +495,11 @@
 
   /* ── 랜덤 룰렛 ──────────────────────────── */
   rouletteBtn.onclick = () => {
-    if (rouletteActive) return;
-    if (zonesData.length === 0) {
-      rouletteCard.textContent = "📝 항목을 먼저 추가해 주세요!";
-      rouletteCard.classList.remove("hidden");
-      setTimeout(() => rouletteCard.classList.add("hidden"), 2500);
-      return;
-    }
-
-    const candidates = zonesData.filter(z => getDisplayPhase(z) !== 4);
+    if (rouletteActive || zonesData.length === 0) return;
+    const candidates = zonesData.filter(z => {
+      const d = daysSince(z.lastCleaned);
+      return d === null || d >= (z.cycle || 3);
+    });
     const pool = candidates.length ? candidates : zonesData;
     let idx = 0, spins = 0, total = 14;
     rouletteActive = true;
@@ -582,14 +523,14 @@
 
   /* ── 이모지 폭죽 ──────────────────────────────── */
   function launchConfetti(emoji) {
-    const emojis = [emoji, "✨", "🌝", "⭐", emoji];
+    const emojis = [emoji, "✨", "🎉", "⭐", emoji];
     for (let i = 0; i < 20; i++) {
       const el = document.createElement("span");
       el.className = "confetti-piece";
       el.textContent = emojis[i % emojis.length];
       el.style.left = Math.random() * 100 + "vw";
       el.style.animationDelay = Math.random() * 0.3 + "s";
-      el.style.fontSize = (1 + Math.random() * 1) + "rem";
+      el.style.fontSize = (1 + Math.random() * 1.5) + "rem";
       confettiLayer.appendChild(el);
       setTimeout(() => el.remove(), 2000);
     }
@@ -631,7 +572,7 @@
     min-height: 100dvh;
     max-width: 480px;
     margin: 0 auto;
-    padding-bottom: 30px; /* 푸터 공간 확보 */
+    padding-bottom: 90px;
     overflow-x: hidden;
   }
 
@@ -654,6 +595,7 @@
     border-radius: 6px; padding: 4px 8px; cursor: pointer; color: var(--sub);
   }
 
+  /* ── King Banner ──────────────────────────────── */
   #king-banner {
     margin: 16px 16px 0;
     background: linear-gradient(135deg, #FFD700 0%, #FFA000 100%);
@@ -671,6 +613,7 @@
     100% { transform: scale(1); opacity: 1; }
   }
 
+  /* ── Roulette ─────────────────────────────────── */
   .roulette-wrap { padding: 12px 16px 0; }
   #roulette-btn {
     width: 100%; padding: 12px; border-radius: var(--radius); border: none;
@@ -683,6 +626,7 @@
   }
   .hidden { display: none !important; }
 
+  /* ── Zones ────────────────────────────────────── */
   #zones { padding: 8px 16px; }
 
   .zone-group { margin-top: 16px; }
@@ -693,13 +637,16 @@
     cursor: pointer; user-select: none;
   }
   .group-drag-handle {
-    font-size: 1.2rem; color: #AAB7B8; cursor: grab;
-    padding-right: 8px; touch-action: none;
+    font-size: 1.2rem;
+    color: #AAB7B8;
+    cursor: grab;
+    padding-right: 8px;
+    touch-action: none;
   }
   .group-drag-handle:active { color: var(--blue); }
   .toggle-icon { font-size: .8rem; opacity: 0.7; }
   .sortable-ghost-group { opacity: 0.5; background: #EBF5FB; border-radius: 8px; }
-
+  
   .group-list { display: flex; flex-direction: column; gap: 10px; }
 
   .zone-card {
@@ -712,7 +659,7 @@
   .sortable-ghost { opacity: 0.4; border: 2px dashed var(--blue); background: #EBF5FB; }
 
   .zone-main { display: flex; align-items: center; gap: 10px; }
-  .zone-emoji { font-size: 1.6rem; flex-shrink: 0; min-width: 32px; text-align:center; }
+  .zone-emoji { font-size: 1.6rem; flex-shrink: 0; min-width: 32px; text-align:center;}
 
   .zone-info { flex: 1; display: flex; flex-direction: column; gap: 4px; }
   .zone-name-row { display: flex; align-items: center; gap: 6px; }
@@ -729,24 +676,30 @@
   .bold { font-weight: 700; }
   .last-who { font-size: .7rem; margin-left: 4px; }
 
-  .zone-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
-
+  /* 컴팩트 액션 버튼들 (터치 영역 확대) */
+  .zone-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+  
   .action-btn {
-    width: 34px; height: 34px; border-radius: 8px; border: 1px solid var(--border);
+    width: 38px; height: 38px; border-radius: 8px; border: 1px solid var(--border);
     background: #F8F9F9; display: flex; align-items: center; justify-content: center;
-    font-size: 1.05rem; cursor: pointer; transition: transform .1s, background .2s;
+    font-size: 1.15rem; cursor: pointer; transition: transform .1s, background .15s;
+    user-select: none;
   }
-
-  .progress-btn { background: #fff; font-size: 1.3rem; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
-
+  .action-btn:active { transform: scale(0.85); background: #EAECEE; }
+  
+  .progress-btn { background: #fff; font-size: 1.3rem; } 
+  .undo-btn { background: #D5F5E3; border-color: #A9DFBF; font-size: 1.1rem; }
+  
+  /* 코멘트 알림 뱃지 */
   .memo-btn { position: relative; }
   .memo-btn.has-memo::after {
     content: ""; position: absolute; top: -2px; right: -2px;
     width: 8px; height: 8px; background: var(--blue); border-radius: 50%;
   }
-
+  
   .edit-btn { background: transparent; border: none; opacity: 0.6; }
 
+  /* 코멘트 영역 스타일 */
   .zone-comments {
     margin-top: 12px; background: #F8F9F9; border-radius: 8px;
     padding: 10px; border: 1px solid #EAECEE;
@@ -757,7 +710,7 @@
     padding: 8px 10px; border-radius: 6px; border: 1px solid #EAECEE; line-height: 1.3;
   }
   .comment-author { font-weight: 700; color: var(--sub); margin-right: 4px; }
-
+  
   .comment-input-wrap { display: flex; align-items: center; gap: 8px; }
   .my-comment-label { font-size: .75rem; font-weight: 700; color: var(--blue); white-space: nowrap; }
   .comment-input {
@@ -766,19 +719,11 @@
   }
   .comment-input:focus { border-color: var(--blue); }
 
+  /* ── Empty State ─────────────────────────────── */
   .empty-state { text-align: center; padding: 50px 20px; color: var(--sub); }
   .empty-icon { font-size: 3rem; display: block; margin-bottom: 12px; }
 
-  /* ── 🕒 푸터 시간 텍스트 ── */
-  .footer-text {
-    text-align: center;
-    font-size: 0.75rem;
-    font-weight: 600;
-    color: #BDC3C7;
-    margin-top: 30px;
-    margin-bottom: 30px;
-  }
-
+  /* ── FAB ──────────────────────────────────────── */
   #fab {
     position: fixed; bottom: 24px; right: calc(50% - 220px);
     width: 54px; height: 54px; border-radius: 50%; background: var(--blue);
@@ -787,6 +732,7 @@
   }
   @media (max-width: 480px) { #fab { right: 20px; } }
 
+  /* ── Modal Base ──────────────────────────────── */
   .modal-overlay {
     position: fixed; inset: 0; background: rgba(0,0,0,.4);
     display: flex; align-items: flex-end; justify-content: center; z-index: 100;
@@ -798,6 +744,7 @@
   @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
   .modal-title { font-size: 1.1rem; font-weight: 700; margin-bottom: 16px; text-align: center; }
 
+  /* ── Forms ────────────────────────────── */
   .form-group { margin-bottom: 12px; display: flex; flex-direction: column; gap: 4px; }
   .form-group label { font-size: .8rem; font-weight: 600; color: var(--sub); }
   .form-group input, .form-group select {
@@ -820,6 +767,7 @@
     background: none; border: none; cursor: pointer; text-decoration: underline;
   }
 
+  /* ── Confetti ─────────────────────────────────── */
   #confetti-layer { position: fixed; inset: 0; pointer-events: none; z-index: 199; overflow: hidden; }
   .confetti-piece { position: absolute; bottom: -20px; animation: rise 1.4s ease-out forwards; }
   @keyframes rise {
@@ -854,8 +802,8 @@
         <input id="inp-name" type="text" placeholder="예: 소파 밑, 수학 문제집 풀기 …" required />
       </div>
       <div class="form-group">
-        <label>그룹 분류 (폴더 지정) <span style="color:var(--sub);font-weight:400;">· 비우면 '기타'로 분류</span></label>
-        <input id="inp-category" type="text" placeholder="예: 거실, 안방, 숙제, 운동 …" />
+        <label>그룹 분류 (폴더 지정)</label>
+        <input id="inp-category" type="text" placeholder="예: 거실, 안방, 숙제, 운동 …" required />
       </div>
       <div class="form-group" style="display:flex; flex-direction:row; gap:10px;">
         <div style="flex:1;">
@@ -873,7 +821,7 @@
       </div>
       <div class="btn-row">
         <button type="button" class="btn-cancel" id="close-add-modal">닫기</button>
-        <button type="submit" class="btn-submit" id="submit-btn">추가하기</button>
+        <button type="submit" class="btn-submit" id="submit-label">추가하기</button>
       </div>
       <button type="button" class="btn-delete-link hidden" id="btn-delete-zone">이 항목 삭제하기</button>
     </form>
@@ -882,7 +830,7 @@
 
 <header>
   <div class="header-row">
-    <span class="header-title">🤖 우리집 매니졀</span>
+    <span class="header-title">📋 우리 집 매니저</span>
     <div class="member-control">
       <span id="member-badge"></span>
       <button id="change-member-btn">변경</button>
@@ -898,8 +846,6 @@
 </div>
 
 <div id="zones"></div>
-
-<div id="last-updated-footer" class="footer-text">마지막 업데이트: 로딩 중...</div>
 
 <button id="fab" title="항목 추가">+</button>
 
