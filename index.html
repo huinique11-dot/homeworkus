@@ -396,9 +396,6 @@
         if (!currentRole) { alert("먼저 멤버를 설정해 주세요!"); return; }
         vibrateShort();
 
-        btn.disabled = true;
-        setTimeout(() => { btn.disabled = false; }, 300);
-
         const id = btn.dataset.id;
         const zone = zonesData.find(z => z.id === id);
         if(!zone) return;
