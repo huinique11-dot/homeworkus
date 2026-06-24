@@ -3,7 +3,34 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-<title>🤖 우리집 매니저</title>
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+<meta name="apple-mobile-web-app-title" content="우리집 매니졀" />
+<title>🤖 우리집 매니졀</title>
+
+<script>
+  const canvas = document.createElement('canvas');
+  canvas.width = 192;
+  canvas.height = 192;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#FFFFFF'; // 아이콘 배경색 (깔끔한 흰색)
+  ctx.fillRect(0, 0, 192, 192);
+  ctx.font = '120px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('🤖', 96, 105);
+  const iconUrl = canvas.toDataURL('image/png');
+
+  const linkFavicon = document.createElement('link');
+  linkFavicon.rel = 'icon';
+  linkFavicon.href = iconUrl;
+  document.head.appendChild(linkFavicon);
+
+  const linkApple = document.createElement('link');
+  linkApple.rel = 'apple-touch-icon';
+  linkApple.href = iconUrl;
+  document.head.appendChild(linkApple);
+</script>
 
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
 
@@ -852,7 +879,7 @@
 
 <header>
   <div class="header-row">
-    <span class="header-title">📋 우리 집 매니저</span>
+    <span class="header-title">🤖 우리집 매니졀</span>
     <div class="member-control">
       <span id="member-badge"></span>
       <button id="change-member-btn">변경</button>
