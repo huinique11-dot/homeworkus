@@ -3,13 +3,11 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-<!-- 모바일 앱처럼 보이게 하는 필수 태그들 -->
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="default" />
 <meta name="apple-mobile-web-app-title" content="우리집 매니졀" />
 <title>🤖 우리집 매니졀</title>
 
-<!-- 홈 화면 추가용 로봇 이모지 아이콘 자동 생성기 -->
 <script>
   const canvas = document.createElement('canvas');
   canvas.width = 192;
@@ -34,10 +32,8 @@
   document.head.appendChild(linkApple);
 </script>
 
-<!-- 모바일 터치 드래그 앤 드롭을 위한 SortableJS 라이브러리 -->
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
 
-<!-- Firebase v10 CDN -->
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
   import {
@@ -46,9 +42,6 @@
     onSnapshot, arrayUnion
   } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
-  /* ====================================================
-     🔑 여기에 본인의 Firebase 프로젝트 설정을 입력하세요.
-  ==================================================== */
   const firebaseConfig = {
     apiKey: "AIzaSyDhFAROrgAiaqjXB-TcCLfVzwnRvdRH3yc",
     authDomain: "homework-87845.firebaseapp.com",
@@ -57,34 +50,31 @@
     messagingSenderId: "705292024213",
     appId: "1:705292024213:web:fb7d893c9e4993669f9e9c"
   };
-  /* ==================================================== */
 
   const app = initializeApp(firebaseConfig);
   const db  = getFirestore(app);
   const ZONES_COL = "zones";
 
-  /* ── 역할 및 상수 설정 ───────────────────────────── */
   const ROLES = ["아빠", "엄마", "미네"];
   const PENALTY_EMOJIS = ["🙄","😛","😜","🤪","😶","🤨","🤔","🤫","🫣","🫩","😵‍💫","🤢","🤮","😠","😡","🤬","👿","☠️"];
-  
-  // 0:텅빔(🌚) ~ 4:완료(🌝) ~ 7:거의다기움(🌘)
-  const MOON_PHASES = ["🌚", "🌒", "🌓", "🌔", "🌝", "🌖", "🌗", "🌘"]; 
+  const MOON_PHASES = ["🌚", "🌒", "🌓", "🌔", "🌝", "🌖", "🌗", "🌘"];
 
-  /* ── 상태 ─────────────────────────────────────── */
   let currentRole  = localStorage.getItem("hm_role") || null;
   let currentEmoji = localStorage.getItem("hm_emoji") || null;
-  let collapsedGroups = JSON.parse(localStorage.getItem("hm_collapsed") || "{}"); 
+  let collapsedGroups = JSON.parse(localStorage.getItem("hm_collapsed") || "{}");
   let openCommentIds = new Set();
   let zonesData    = [];
   let rouletteActive = false;
 
-  /* ── DOM 참조 ─────────────────────────────────── */
+  // ✅ FIX 4: Sortable 인스턴스를 추적하여 중복 생성 방지
+  let sortableInstances = [];
+
   const memberModal   = document.getElementById("member-modal");
   const roleSelect    = document.getElementById("inp-role");
   const profileEmoji  = document.getElementById("inp-profile-emoji");
   const saveMemberBtn = document.getElementById("save-member-btn");
   const memberBadge   = document.getElementById("member-badge");
-  
+
   const kingBanner    = document.getElementById("king-banner");
   const rouletteBtn   = document.getElementById("roulette-btn");
   const rouletteCard  = document.getElementById("roulette-card");
@@ -127,39 +117,54 @@
   });
 
   /* ── 달 위상 계산 ──────────────────────────────── */
+  // ✅ FIX 6: 달 위상 decay 계산 - 8 미만에서 floor 고착 방지
   function getDisplayPhase(zone) {
     const now = Date.now();
     let basePhase = zone.currentPhase !== undefined ? zone.currentPhase : 0;
-    
-    // serverTimestamp 에러 방지를 위해 숫자로 바로 변환
+
     let baseTime = zone.healthUpdatedAt || now;
     if (typeof baseTime !== 'number') {
       baseTime = baseTime.toMillis ? baseTime.toMillis() : now;
     }
-    
+
     const days = (now - baseTime) / 86400000;
     const cycle = zone.cycle || 1;
-    const decay = (days / cycle) * 4.0; // 목표 주기에 맞춰 4단계로 깎여나감
-    
+    const decay = (days / cycle) * 4.0;
+
     if (basePhase === 0) return 0;
-    
+
     if (basePhase >= 4) {
-      // 🌝(4) 이상일 때 방치하면 🌖(5) -> 🌗(6) -> 🌘(7) -> 🌚(0) 순서로 깎임
-      let p = basePhase + decay;
+      // 🌝(4) 이상 → 방치하면 🌖→🌗→🌘→🌚 순으로 진행
+      // decay가 4 이상이면 0으로 (한 사이클 경과)
+      if (decay >= 4) return 0;
+      const p = basePhase + decay;
+      // p가 8 이상이면 0으로 (배열 범위 초과 방지)
       if (p >= 8) return 0;
-      return Math.floor(p);
+      return Math.min(7, Math.floor(p));
     } else {
-      // 🌔(3) 이하로 차오르던 중 방치하면 다시 🌚(0)으로 스르륵 깎임
-      let p = basePhase - decay;
+      // 🌔(3) 이하 → 방치하면 다시 🌚(0)으로
+      const p = basePhase - decay;
       if (p <= 0) return 0;
-      return Math.floor(p);
+      return Math.max(1, Math.floor(p));
     }
   }
 
   /* ── 경과일 계산 ──────────────────────────────── */
   function daysSince(ts) {
     if (!ts) return null;
-    const ms = ts.toDate ? ts.toDate().getTime() : (typeof ts === 'number' ? ts : ts.seconds * 1000);
+    // ✅ FIX 5: Firestore Timestamp, 숫자, seconds 객체 모두 안전하게 처리
+    let ms;
+    if (typeof ts === 'number') {
+      ms = ts;
+    } else if (ts.toDate) {
+      ms = ts.toDate().getTime();
+    } else if (ts.toMillis) {
+      ms = ts.toMillis();
+    } else if (ts.seconds) {
+      ms = ts.seconds * 1000;
+    } else {
+      return null;
+    }
     const today = new Date();
     today.setHours(0,0,0,0);
     const target = new Date(ms);
@@ -168,30 +173,34 @@
   }
 
   /* ── 오늘의 활동왕 계산 ────────────────────────── */
+  // ✅ FIX 1: kingEmoji 추출 로직 수정 - lastWho에서 역할명만 정확히 제거
   function updateKingBanner() {
     let counts = {};
-    ROLES.forEach(r => counts[r] = 0);
+    let emojiMap = {};
+    ROLES.forEach(r => { counts[r] = 0; emojiMap[r] = "👑"; });
     let maxCount = 0;
     let kingRole = null;
-    let kingEmoji = "👑";
 
     zonesData.forEach(z => {
-      if(daysSince(z.lastCleaned) === 0 && z.lastWho) {
+      if (daysSince(z.lastCleaned) === 0 && z.lastWho) {
         ROLES.forEach(r => {
-          if(z.lastWho.includes(r)) {
+          if (z.lastWho.includes(r)) {
             counts[r]++;
-            if(counts[r] > maxCount) {
+            // 역할명을 제거한 나머지가 이모지 (역할명 위치 무관하게 처리)
+            const extracted = z.lastWho.replace(r, '').trim();
+            if (extracted) emojiMap[r] = extracted;
+            if (counts[r] > maxCount) {
               maxCount = counts[r];
               kingRole = r;
-              kingEmoji = z.lastWho.replace(r, '').trim() || "👑";
             }
           }
         });
       }
     });
 
-    if(maxCount > 0) {
-      kingBanner.innerHTML = `🏆 오늘의 활동왕: <strong>${kingEmoji} ${kingRole}</strong> (${maxCount}개 완료!)`;
+    if (maxCount > 0 && kingRole) {
+      const kingEmojiDisplay = emojiMap[kingRole];
+      kingBanner.innerHTML = `🏆 오늘의 활동왕: <strong>${kingEmojiDisplay} ${kingRole}</strong> (${maxCount}개 완료!)`;
       kingBanner.classList.remove("hidden");
     } else {
       kingBanner.classList.add("hidden");
@@ -199,9 +208,18 @@
   }
 
   /* ── 리스트 렌더링 ─────────────────────────── */
+  // ✅ FIX 4: 렌더링 전에 기존 Sortable 인스턴스 모두 destroy
+  function destroyAllSortables() {
+    sortableInstances.forEach(s => {
+      try { s.destroy(); } catch(_) {}
+    });
+    sortableInstances = [];
+  }
+
   function renderZones() {
+    destroyAllSortables();
     zonesEl.innerHTML = "";
-    updateKingBanner(); 
+    updateKingBanner();
 
     if (zonesData.length === 0) {
       zonesEl.innerHTML = `<div class="empty-state"><span class="empty-icon">📝</span><p>아직 항목이 없어요.<br>+ 버튼으로 할 일을 추가해 보세요!</p></div>`;
@@ -231,7 +249,8 @@
 
     renderGroups.forEach(group => renderGroupUI(group.title, group.zones));
 
-    Sortable.create(zonesEl, {
+    // ✅ FIX 4: 인스턴스 등록
+    const groupSortable = Sortable.create(zonesEl, {
       handle: '.group-drag-handle',
       animation: 150,
       delay: 150,
@@ -242,14 +261,15 @@
         localStorage.setItem('hm_group_order', JSON.stringify(titles));
       }
     });
+    sortableInstances.push(groupSortable);
   }
 
   function renderGroupUI(title, zones) {
     const isCollapsed = collapsedGroups[title] || false;
-    
+
     const groupEl = document.createElement("div");
     groupEl.className = "zone-group";
-    
+
     groupEl.innerHTML = `
       <div class="group-title" data-title="${title}">
         <div style="display:flex; align-items:center;">
@@ -259,23 +279,22 @@
         <span class="toggle-icon">${isCollapsed ? "◀️" : "🔽"}</span>
       </div>
     `;
-    
+
     const listEl = document.createElement("div");
     listEl.className = `group-list ${isCollapsed ? 'hidden' : ''}`;
 
     zones.forEach(zone => {
-      const moonLevel = getDisplayPhase(zone); // 0(🌚) ~ 7(🌘)
+      const moonLevel = getDisplayPhase(zone);
       const days = daysSince(zone.lastCleaned);
       const cycle = zone.cycle || 1;
-      
-      // 달이 완전히 시커멓고, 주기도 지났으면 연체!
+
       const overdue = (moonLevel === 0 && days !== null && days > cycle);
 
       let statusEmoji = "";
       let dayLabel = "기록 없음";
 
       if (days === null) {
-        statusEmoji = ""; 
+        statusEmoji = "";
       } else if (days === 0 && moonLevel === 4) {
         dayLabel = "오늘 완료 😎";
       } else {
@@ -289,9 +308,10 @@
         }
       }
 
-      const assigneeLabel = zone.assignee && zone.assignee !== '공통' ? `<span class="assignee-badge">${zone.assignee} 당번</span>` : '';
+      const assigneeLabel = zone.assignee && zone.assignee !== '공통'
+        ? `<span class="assignee-badge">${zone.assignee} 당번</span>` : '';
       const commentsObj = (typeof zone.comments === 'object' && zone.comments !== null) ? zone.comments : {};
-      
+
       const commentsHtml = Object.entries(commentsObj)
         .map(([role, data]) => `<div class="comment-line"><span class="comment-author">${data.emoji || ''} ${role}:</span> <span class="comment-text">${data.text}</span></div>`)
         .join("");
@@ -300,8 +320,8 @@
 
       const card = document.createElement("div");
       card.className = `zone-card ${overdue ? "overdue" : ""} ${moonLevel===4 && days===0 ? "cleared" : ""}`;
-      card.dataset.id = zone.id; 
-      
+      card.dataset.id = zone.id;
+
       card.innerHTML = `
         <div class="zone-main">
           <div class="zone-emoji">${zone.emoji || "📝"}${statusEmoji}</div>
@@ -311,12 +331,12 @@
               ${assigneeLabel}
             </div>
             <div class="zone-meta">
-              주기 ${cycle}일 <span class="divider">|</span> 
+              주기 ${cycle}일 <span class="divider">|</span>
               <span class="${overdue ? "text-red" : (moonLevel===4 && days===0 ? "text-green" : "")} bold">${dayLabel}</span>
               ${zone.lastWho ? `<span class="last-who">(${zone.lastWho})</span>` : ""}
             </div>
           </div>
-          
+
           <div class="zone-actions">
             <button class="action-btn progress-btn" data-id="${zone.id}" data-prog="${moonLevel}" data-days="${days}" data-emoji="${zone.emoji||"✨"}" title="진행도">
               ${MOON_PHASES[moonLevel]}
@@ -325,7 +345,7 @@
             <button class="action-btn edit-btn" data-id="${zone.id}" title="수정">⚙️</button>
           </div>
         </div>
-        
+
         <div class="zone-comments ${openCommentIds.has(zone.id) ? '' : 'hidden'}" id="comments-${zone.id}">
           ${commentsHtml ? `<div class="comments-list">${commentsHtml}</div>` : ""}
           <div class="comment-input-wrap">
@@ -343,20 +363,21 @@
 
     const titleHeader = groupEl.querySelector(".group-title");
     titleHeader.addEventListener('click', (e) => {
-      if(e.target.classList.contains('group-drag-handle')) return; 
+      if(e.target.classList.contains('group-drag-handle')) return;
       collapsedGroups[title] = !collapsedGroups[title];
       localStorage.setItem("hm_collapsed", JSON.stringify(collapsedGroups));
-      renderZones(); 
+      renderZones();
     });
 
     if (!isCollapsed) {
-      Sortable.create(listEl, {
-        delay: 250, 
-        delayOnTouchOnly: true, 
+      // ✅ FIX 4: 아이템 Sortable도 인스턴스 등록
+      const itemSortable = Sortable.create(listEl, {
+        delay: 250,
+        delayOnTouchOnly: true,
         animation: 150,
-        ghostClass: "sortable-ghost", 
-        filter: "button, input", 
-        preventOnFilter: false, 
+        ghostClass: "sortable-ghost",
+        filter: "button, input",
+        preventOnFilter: false,
         onEnd: async function () {
           const itemEls = Array.from(listEl.querySelectorAll('.zone-card'));
           const originalOrders = zones.map(z => z.order || Date.now()).sort((a, b) => a - b);
@@ -366,43 +387,47 @@
           });
         }
       });
+      sortableInstances.push(itemSortable);
     }
 
-    /* ── 🌟 달님 버튼 클릭 핵심 로직 ── */
+    /* ── 달님 버튼 클릭 핵심 로직 ── */
     listEl.querySelectorAll(".progress-btn").forEach(btn => {
       btn.onclick = async () => {
         if (!currentRole) { alert("먼저 멤버를 설정해 주세요!"); return; }
         vibrateShort();
-        
-        // 깜빡임(Flicker) 방지를 위해 버튼을 아주 짧게 무효화
-        btn.disabled = true; 
+
+        btn.disabled = true;
         setTimeout(() => { btn.disabled = false; }, 300);
 
         const id = btn.dataset.id;
         const zone = zonesData.find(z => z.id === id);
         if(!zone) return;
 
-        const currentDisplayPhase = parseInt(btn.dataset.prog); 
+        const currentDisplayPhase = parseInt(btn.dataset.prog);
         const days = btn.dataset.days === "null" ? null : parseInt(btn.dataset.days);
         const now = Date.now();
-        
-        // 무조건 누를 때마다 오른쪽으로 전진! (0->1->2...7->0)
+
         let nextPhase = (currentDisplayPhase + 1) % 8;
 
         let updateData = {
           currentPhase: nextPhase,
-          healthUpdatedAt: now // 깜빡임 방지를 위해 Date.now() 로컬 시간 사용
+          healthUpdatedAt: now
         };
 
         if (currentDisplayPhase === 4) {
-          // 보름달(🌝)을 눌렀을 때 -> "취소(되돌리기)" 의도로 판단하고 🌖(5)로 넘김
+          // 🌝 보름달 → 취소(되돌리기) 의도
           if (days === 0) {
             let newHistory = [...(zone.history || [])];
-            newHistory.pop(); // 방금 완료한 기록 삭제
+            newHistory.pop();
+
+            // ✅ FIX 5: lastCleaned 타입을 항상 숫자(ms) 또는 null로 통일
             let newLastCleaned = null;
             let newLastWho = "";
             if (newHistory.length > 0) {
-              newLastCleaned = newHistory[newHistory.length - 1];
+              const prev = newHistory[newHistory.length - 1];
+              // 숫자면 그대로, Firestore Timestamp면 toMillis()로 변환
+              newLastCleaned = typeof prev === 'number' ? prev
+                             : (prev.toMillis ? prev.toMillis() : prev.seconds * 1000);
               newLastWho = "이전 기록 복구됨";
             }
             updateData.lastCleaned = newLastCleaned;
@@ -410,7 +435,7 @@
             updateData.lastWho = newLastWho;
           }
         } else if (nextPhase === 4) {
-          // 🌔(3)에서 눌러서 🌝(4)가 되었을 때 -> "정식 완료" 처리!
+          // 🌔 → 🌝 정식 완료 처리
           updateData.lastCleaned = now;
           updateData.history = arrayUnion(now);
           updateData.lastWho = currentEmoji + currentRole;
@@ -423,7 +448,7 @@
 
     listEl.querySelectorAll(".edit-btn").forEach(btn => btn.onclick = () => openEditModal(btn.dataset.id));
     listEl.querySelectorAll(".comment-input").forEach(inp => inp.onchange = (e) => updateComment(inp.dataset.id, e.target.value));
-    
+
     listEl.querySelectorAll(".memo-btn").forEach(btn => {
       btn.onclick = () => {
         const id = btn.dataset.id;
@@ -439,20 +464,21 @@
     });
   }
 
-  /* ── 기타 기능 함수들 ────────────────────────────── */
+  /* ── 코멘트 업데이트 ────────────────────────────── */
   async function updateComment(id, text) {
     if (!currentRole) { alert("먼저 멤버를 설정해 주세요!"); return; }
     const zone = zonesData.find(z => z.id === id);
     if (!zone) return;
-    
+
     const comments = (typeof zone.comments === 'object' && zone.comments !== null) ? { ...zone.comments } : {};
-    
+
     if (text.trim() === "") delete comments[currentRole];
     else comments[currentRole] = { emoji: currentEmoji, text: text.trim() };
-    
+
     await updateDoc(doc(db, ZONES_COL, id), { comments });
   }
 
+  /* ── 항목 삭제 ────────────────────────────── */
   async function deleteZone(id) {
     if (!confirm("이 항목을 정말 삭제할까요?")) return;
     await deleteDoc(doc(db, ZONES_COL, id));
@@ -467,7 +493,7 @@
     editingId = null;
     addForm.reset();
     document.getElementById("modal-title").textContent = "항목 추가";
-    document.getElementById("submit-label").textContent = "추가하기";
+    document.getElementById("submit-btn").textContent = "추가하기";
     document.getElementById("btn-delete-zone").classList.add("hidden");
     populateAssigneeSelect();
     addModal.classList.remove("hidden");
@@ -478,21 +504,21 @@
     if (!zone) return;
     editingId = id;
     populateAssigneeSelect();
-    document.getElementById("inp-name").value  = zone.name  || "";
+    document.getElementById("inp-name").value     = zone.name     || "";
     document.getElementById("inp-category").value = zone.category || "";
-    document.getElementById("inp-emoji").value = zone.emoji || "";
-    document.getElementById("inp-cycle").value = zone.cycle || 1;
+    document.getElementById("inp-emoji").value    = zone.emoji    || "";
+    document.getElementById("inp-cycle").value    = zone.cycle    || 1;
     document.getElementById("inp-assignee").value = zone.assignee || "공통";
-    
+
     document.getElementById("modal-title").textContent = "항목 수정";
-    document.getElementById("submit-label").textContent = "저장하기";
+    document.getElementById("submit-btn").textContent = "저장하기";
     document.getElementById("btn-delete-zone").classList.remove("hidden");
     addModal.classList.remove("hidden");
   }
 
   function populateAssigneeSelect() {
     const sel = document.getElementById("inp-assignee");
-    sel.innerHTML = `<option value="공통">공통 (모두 함께)</option>` + 
+    sel.innerHTML = `<option value="공통">공통 (모두 함께)</option>` +
                     ROLES.map(r => `<option value="${r}">${r}</option>`).join("");
   }
 
@@ -502,6 +528,7 @@
   addForm.onsubmit = async e => {
     e.preventDefault();
     const name     = document.getElementById("inp-name").value.trim();
+    // ✅ FIX 2: category가 비어 있어도 "기타"로 처리 (required 속성 제거와 함께)
     const category = document.getElementById("inp-category").value.trim() || "기타";
     const emoji    = document.getElementById("inp-emoji").value.trim() || "📝";
     const cycle    = parseInt(document.getElementById("inp-cycle").value) || 1;
@@ -525,10 +552,19 @@
 
   /* ── 랜덤 룰렛 ──────────────────────────── */
   rouletteBtn.onclick = () => {
-    if (rouletteActive || zonesData.length === 0) return;
+    if (rouletteActive) return;
+
+    // ✅ FIX 3: 항목 0개일 때 사용자 피드백 추가
+    if (zonesData.length === 0) {
+      rouletteCard.textContent = "📝 항목을 먼저 추가해 주세요!";
+      rouletteCard.classList.remove("hidden");
+      setTimeout(() => rouletteCard.classList.add("hidden"), 2500);
+      return;
+    }
+
     const candidates = zonesData.filter(z => {
       const actualHealth = getDisplayPhase(z);
-      return actualHealth !== 4; // 🌝(4)가 아닌 항목만 추천
+      return actualHealth !== 4;
     });
     const pool = candidates.length ? candidates : zonesData;
     let idx = 0, spins = 0, total = 14;
@@ -578,7 +614,6 @@
 </script>
 
 <style>
-  /* ── Reset & Base ─────────────────────────────── */
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
   :root {
@@ -606,7 +641,6 @@
     overflow-x: hidden;
   }
 
-  /* ── Header ──────────────────────────────────── */
   header {
     background: #fff;
     padding: 16px 20px;
@@ -625,7 +659,6 @@
     border-radius: 6px; padding: 4px 8px; cursor: pointer; color: var(--sub);
   }
 
-  /* ── King Banner ──────────────────────────────── */
   #king-banner {
     margin: 16px 16px 0;
     background: linear-gradient(135deg, #FFD700 0%, #FFA000 100%);
@@ -643,7 +676,6 @@
     100% { transform: scale(1); opacity: 1; }
   }
 
-  /* ── Roulette ─────────────────────────────────── */
   .roulette-wrap { padding: 12px 16px 0; }
   #roulette-btn {
     width: 100%; padding: 12px; border-radius: var(--radius); border: none;
@@ -656,7 +688,6 @@
   }
   .hidden { display: none !important; }
 
-  /* ── Zones ────────────────────────────────────── */
   #zones { padding: 8px 16px; }
 
   .zone-group { margin-top: 16px; }
@@ -667,16 +698,13 @@
     cursor: pointer; user-select: none;
   }
   .group-drag-handle {
-    font-size: 1.2rem;
-    color: #AAB7B8;
-    cursor: grab;
-    padding-right: 8px;
-    touch-action: none;
+    font-size: 1.2rem; color: #AAB7B8; cursor: grab;
+    padding-right: 8px; touch-action: none;
   }
   .group-drag-handle:active { color: var(--blue); }
   .toggle-icon { font-size: .8rem; opacity: 0.7; }
   .sortable-ghost-group { opacity: 0.5; background: #EBF5FB; border-radius: 8px; }
-  
+
   .group-list { display: flex; flex-direction: column; gap: 10px; }
 
   .zone-card {
@@ -689,7 +717,7 @@
   .sortable-ghost { opacity: 0.4; border: 2px dashed var(--blue); background: #EBF5FB; }
 
   .zone-main { display: flex; align-items: center; gap: 10px; }
-  .zone-emoji { font-size: 1.6rem; flex-shrink: 0; min-width: 32px; text-align:center;}
+  .zone-emoji { font-size: 1.6rem; flex-shrink: 0; min-width: 32px; text-align:center; }
 
   .zone-info { flex: 1; display: flex; flex-direction: column; gap: 4px; }
   .zone-name-row { display: flex; align-items: center; gap: 6px; }
@@ -706,27 +734,25 @@
   .bold { font-weight: 700; }
   .last-who { font-size: .7rem; margin-left: 4px; }
 
-  /* 컴팩트 액션 버튼들 */
   .zone-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
-  
+
   .action-btn {
     width: 34px; height: 34px; border-radius: 8px; border: 1px solid var(--border);
     background: #F8F9F9; display: flex; align-items: center; justify-content: center;
     font-size: 1.05rem; cursor: pointer; transition: transform .1s, background .2s;
   }
   .action-btn:active { transform: scale(0.9); }
-  
+
   .progress-btn { background: #fff; font-size: 1.3rem; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
-  
+
   .memo-btn { position: relative; }
   .memo-btn.has-memo::after {
     content: ""; position: absolute; top: -2px; right: -2px;
     width: 8px; height: 8px; background: var(--blue); border-radius: 50%;
   }
-  
+
   .edit-btn { background: transparent; border: none; opacity: 0.6; }
 
-  /* 코멘트 영역 스타일 */
   .zone-comments {
     margin-top: 12px; background: #F8F9F9; border-radius: 8px;
     padding: 10px; border: 1px solid #EAECEE;
@@ -737,7 +763,7 @@
     padding: 8px 10px; border-radius: 6px; border: 1px solid #EAECEE; line-height: 1.3;
   }
   .comment-author { font-weight: 700; color: var(--sub); margin-right: 4px; }
-  
+
   .comment-input-wrap { display: flex; align-items: center; gap: 8px; }
   .my-comment-label { font-size: .75rem; font-weight: 700; color: var(--blue); white-space: nowrap; }
   .comment-input {
@@ -746,11 +772,9 @@
   }
   .comment-input:focus { border-color: var(--blue); }
 
-  /* ── Empty State ─────────────────────────────── */
   .empty-state { text-align: center; padding: 50px 20px; color: var(--sub); }
   .empty-icon { font-size: 3rem; display: block; margin-bottom: 12px; }
 
-  /* ── FAB ──────────────────────────────────────── */
   #fab {
     position: fixed; bottom: 24px; right: calc(50% - 220px);
     width: 54px; height: 54px; border-radius: 50%; background: var(--blue);
@@ -759,7 +783,6 @@
   }
   @media (max-width: 480px) { #fab { right: 20px; } }
 
-  /* ── Modal Base ──────────────────────────────── */
   .modal-overlay {
     position: fixed; inset: 0; background: rgba(0,0,0,.4);
     display: flex; align-items: flex-end; justify-content: center; z-index: 100;
@@ -771,7 +794,6 @@
   @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
   .modal-title { font-size: 1.1rem; font-weight: 700; margin-bottom: 16px; text-align: center; }
 
-  /* ── Forms ────────────────────────────── */
   .form-group { margin-bottom: 12px; display: flex; flex-direction: column; gap: 4px; }
   .form-group label { font-size: .8rem; font-weight: 600; color: var(--sub); }
   .form-group input, .form-group select {
@@ -794,7 +816,6 @@
     background: none; border: none; cursor: pointer; text-decoration: underline;
   }
 
-  /* ── Confetti ─────────────────────────────────── */
   #confetti-layer { position: fixed; inset: 0; pointer-events: none; z-index: 199; overflow: hidden; }
   .confetti-piece { position: absolute; bottom: -20px; animation: rise 1.4s ease-out forwards; }
   @keyframes rise {
@@ -831,8 +852,9 @@
         <input id="inp-name" type="text" placeholder="예: 소파 밑, 수학 문제집 풀기 …" required />
       </div>
       <div class="form-group">
-        <label>그룹 분류 (폴더 지정)</label>
-        <input id="inp-category" type="text" placeholder="예: 거실, 안방, 숙제, 운동 …" required />
+        <label>그룹 분류 (폴더 지정) <span style="color:var(--sub);font-weight:400;">· 비우면 '기타'로 분류</span></label>
+        <!-- ✅ FIX 2: required 제거 → JS에서 || "기타" 처리 -->
+        <input id="inp-category" type="text" placeholder="예: 거실, 안방, 숙제, 운동 …" />
       </div>
       <div class="form-group" style="display:flex; flex-direction:row; gap:10px;">
         <div style="flex:1;">
@@ -850,7 +872,8 @@
       </div>
       <div class="btn-row">
         <button type="button" class="btn-cancel" id="close-add-modal">닫기</button>
-        <button type="submit" class="btn-submit" id="submit-label">추가하기</button>
+        <!-- ✅ FIX: submit-label → submit-btn (id로 textContent 변경하기 위해 명확화) -->
+        <button type="submit" class="btn-submit" id="submit-btn">추가하기</button>
       </div>
       <button type="button" class="btn-delete-link hidden" id="btn-delete-zone">이 항목 삭제하기</button>
     </form>
@@ -868,7 +891,7 @@
   </div>
 </header>
 
-<!-- 활동왕 랭킹 배너 -->
+<!-- 활동왕 배너 -->
 <div id="king-banner" class="hidden"></div>
 
 <!-- 랜덤 룰렛 -->
