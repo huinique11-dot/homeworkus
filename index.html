@@ -5,10 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
 <title>🤖 우리집 매니졀</title>
 
-<!-- 모바일 터치 드래그 앤 드롭을 위한 SortableJS 라이브러리 -->
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
 
-<!-- Firebase v10 CDN -->
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
   import {
@@ -36,8 +34,8 @@
   /* ====================================================
      ✨ 커스텀 디자인 및 설정 변수
   ==================================================== */
-  const KING_PREFIX = "🫡👑✨"; // 활동왕 이름 앞쪽 이모지
-  const KING_SUFFIX = "✨👑🫡"; // 활동왕 이름 뒤쪽 이모지
+  const KING_PREFIX = "🫡👑✨"; 
+  const KING_SUFFIX = "✨👑🫡"; 
   
   const ROLES = ["아빠", "엄마", "미네"];
   const ALL_MOONS = ["🌑", "🌒", "🌓", "🌔", "🌝", "🌖", "🌗", "🌘"];
@@ -73,7 +71,7 @@
   function renderMemberModal() {
     roleSelect.innerHTML = ROLES.map(r => `<option value="${r}" ${r===currentRole?'selected':''}>${r}</option>`).join("");
     profileEmoji.value = currentEmoji || "😀";
-    memberModal.classList.remove("hidden");
+    memberModal.style.display = "flex";
   }
 
   saveMemberBtn.onclick = () => {
@@ -81,7 +79,7 @@
     currentEmoji = profileEmoji.value || "😀";
     localStorage.setItem("hm_role", currentRole);
     localStorage.setItem("hm_emoji", currentEmoji);
-    memberModal.classList.add("hidden");
+    memberModal.style.display = "none";
     updateMemberBadge();
     renderZones();
   };
@@ -119,26 +117,22 @@
       }
     });
 
-    // 1. 내 오늘 미션 개수 실시간 반영 (블라인드 비밀 유지 🤫)
     if (currentRole && counts[currentRole] > 0) {
       myTodayCountEl.innerText = `(${counts[currentRole]})`;
     } else {
       myTodayCountEl.innerText = `(0)`;
     }
 
-    // 2. 👑 초화려한 랭킹 배너 업데이트 (개수 노출 없음)
     if(maxCount > 0) {
       kingBanner.innerHTML = `${KING_PREFIX} 오늘의 활동왕: <strong>${kingEmoji} ${kingRole}</strong> ${KING_SUFFIX}`;
-      kingBanner.classList.remove("hidden");
+      kingBanner.style.display = "block";
     } else {
-      kingBanner.classList.add("hidden");
+      kingBanner.style.display = "none";
     }
 
-    // 밤 9시 정산 로직 가동
     check9PMReward(kingRole, maxCount);
   }
 
-  /* ── 날짜 경과일 계산 ── */
   function daysSince(ts) {
     if (!ts) return null;
     const ms = ts.toDate ? ts.toDate().getTime() : (typeof ts === 'number' ? ts : ts.seconds * 1000);
@@ -198,9 +192,9 @@
 
     if (emojiStream.length > 0) {
       farmPanelEl.innerHTML = emojiStream;
-      farmPanelEl.classList.remove("hidden");
+      farmPanelEl.style.display = "block";
     } else {
-      farmPanelEl.classList.add("hidden");
+      farmPanelEl.style.display = "none";
     }
   }
 
@@ -268,7 +262,8 @@
     `;
     
     const listEl = document.createElement("div");
-    listEl.className = `group-list ${isCollapsed ? 'hidden' : ''}`;
+    listEl.className = "group-list";
+    if (isCollapsed) listEl.style.display = "none";
 
     zones.forEach(zone => {
       const days = daysSince(zone.lastCleaned);
@@ -319,7 +314,7 @@
             <button class="action-btn edit-btn" data-id="${zone.id}">⚙️</button>
           </div>
         </div>
-        <div class="zone-comments ${openCommentIds.has(zone.id) ? '' : 'hidden'}" id="comments-${zone.id}">
+        <div class="zone-comments" id="comments-${zone.id}" style="${openCommentIds.has(zone.id) ? '' : 'display:none;'}">
           ${commentsHtml ? `<div class="comments-list">${commentsHtml}</div>` : ""}
           <div class="comment-input-wrap">
             <span class="my-comment-label">나의 메모</span>
@@ -381,8 +376,8 @@
       e.stopPropagation();
       const id = memoBtn.dataset.id;
       const block = document.getElementById("comments-" + id);
-      if (openCommentIds.has(id)) { openCommentIds.delete(id); block.classList.add("hidden"); }
-      else { openCommentIds.add(id); block.classList.remove("hidden"); }
+      if (openCommentIds.has(id)) { openCommentIds.delete(id); block.style.display = "none"; }
+      else { openCommentIds.add(id); block.style.display = "block"; }
       return;
     }
   });
@@ -417,7 +412,7 @@
 
   async function deleteZone(id) {
     if (!confirm("이 항목을 삭제할까요?")) return;
-    await deleteDoc(doc(db, ZONES_COL, id)); addModal.classList.add("hidden");
+    await deleteDoc(doc(db, ZONES_COL, id)); addModal.style.display = "none";
   }
 
   /* ====================================================
@@ -428,8 +423,8 @@
     editingId = null; addForm.reset();
     document.getElementById("modal-title").textContent = "항목 추가";
     document.getElementById("submit-label").textContent = "추가하기";
-    document.getElementById("btn-delete-zone").classList.add("hidden");
-    populateAssigneeSelect(); addModal.classList.remove("hidden");
+    document.getElementById("btn-delete-zone").style.display = "none";
+    populateAssigneeSelect(); addModal.style.display = "flex";
   };
 
   function openEditModal(id) {
@@ -442,15 +437,15 @@
     document.getElementById("inp-assignee").value = zone.assignee || "공통";
     document.getElementById("modal-title").textContent = "항목 수정";
     document.getElementById("submit-label").textContent = "저장하기";
-    document.getElementById("btn-delete-zone").classList.remove("hidden");
-    addModal.classList.remove("hidden");
+    document.getElementById("btn-delete-zone").style.display = "block";
+    addModal.style.display = "flex";
   }
 
   function populateAssigneeSelect() {
     document.getElementById("inp-assignee").innerHTML = `<option value="공통">공통 (모두 함께)</option>` + ROLES.map(r => `<option value="${r}">${r}</option>`).join("");
   }
 
-  document.getElementById("close-add-modal").onclick = () => addModal.classList.add("hidden");
+  document.getElementById("close-add-modal").onclick = () => addModal.style.display = "none";
   document.getElementById("btn-delete-zone").onclick = () => { if(editingId) deleteZone(editingId); };
 
   addForm.onsubmit = async e => {
@@ -463,7 +458,7 @@
 
     if (editingId) await updateDoc(doc(db, ZONES_COL, editingId), { name, category, emoji, cycle, assignee });
     else await addDoc(collection(db, ZONES_COL), { name, category, emoji, cycle, assignee, order: Date.now(), lastCleaned: null, lastWho: "", history: [], comments: {}, progress: 0, createdAt: serverTimestamp() });
-    addForm.reset(); addModal.classList.add("hidden");
+    addForm.reset(); addModal.style.display = "none";
   };
 
   /* ── Firestore 실시간 동기화 바인딩 ── */
@@ -486,7 +481,7 @@
   function vibrateShort() { try { if (navigator.vibrate) navigator.vibrate(50); } catch(_) {} }
 
   if (currentRole) updateMemberBadge(); else renderMemberModal();
-  addModal.addEventListener("click", e => { if (e.target === addModal) addModal.classList.add("hidden"); });
+  addModal.addEventListener("click", e => { if (e.target === addModal) addModal.style.display = "none"; });
 </script>
 
 <style>
@@ -495,9 +490,6 @@
   ==================================================== */
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   
-  /* 🌟 이 한 줄이 없어서 모달창이 안 닫혔던 겁니다! 절대 지우면 안 됨 🌟 */
-  .hidden { display: none !important; }
-
   :root {
     --bg: #F5F7F8; --card: #FFFFFF; --text: #2C3E50; --sub: #7F8C8D;
     --green: #2ECC71; --blue: #3498DB; --red: #E74C3C; --yellow: #F1C40F;
@@ -583,7 +575,7 @@
   /* ── 둥둥 띄우는 FAB 및 모달 시트 ── */
   #fab { position: fixed; bottom: 24px; right: calc(50% - 220px); width: 54px; height: 54px; border-radius: 50%; background: var(--blue); color: #fff; font-size: 1.8rem; border: none; box-shadow: 0 4px 12px rgba(52,152,219,.4); cursor: pointer; z-index: 50; }
   @media (max-width: 480px) { #fab { right: 20px; } }
-  .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.4); display: flex; align-items: flex-end; justify-content: center; z-index: 100; }
+  .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.4); display: none; align-items: flex-end; justify-content: center; z-index: 100; }
   .modal-sheet { background: #fff; border-radius: 20px 20px 0 0; padding: 24px 20px 36px; width: 100%; max-width: 480px; animation: slideUp .2s ease; }
   @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
   .modal-title { font-size: 1.1rem; font-weight: 700; margin-bottom: 16px; text-align: center; }
@@ -601,8 +593,7 @@
 </head>
 <body>
 
-<!-- 서비스 진입용 사용자 설정 모달 -->
-<div class="modal-overlay hidden" id="member-modal">
+<div class="modal-overlay" id="member-modal">
   <div class="modal-sheet">
     <p class="modal-title">👋 내 역할과 이모지 선택</p>
     <div class="form-group">
@@ -617,8 +608,7 @@
   </div>
 </div>
 
-<!-- 할 일 추가/수정용 모달 -->
-<div class="modal-overlay hidden" id="add-modal">
+<div class="modal-overlay" id="add-modal">
   <div class="modal-sheet">
     <p class="modal-title" id="modal-title">항목 추가</p>
     <form id="add-form" autocomplete="off">
@@ -648,12 +638,11 @@
         <button type="button" class="btn-cancel" id="close-add-modal">닫기</button>
         <button type="submit" class="btn-submit" id="submit-label">추가하기</button>
       </div>
-      <button type="button" class="btn-delete-link hidden" id="btn-delete-zone">이 항목 삭제하기</button>
+      <button type="button" class="btn-delete-link" id="btn-delete-zone">이 항목 삭제하기</button>
     </form>
   </div>
 </div>
 
-<!-- 앱 상단 헤더 구역 -->
 <header>
   <div class="header-row">
     <span class="header-title">🤖 우리집 매니졀</span>
@@ -665,17 +654,13 @@
   </div>
 </header>
 
-<!-- 실시간 무빙 오로라 랭킹 배너 -->
-<div id="king-banner" class="hidden"></div>
+<div id="king-banner" style="display:none;"></div>
 
-<!-- 메인 할 일 카드 리스트 출력구 -->
 <div id="zones"></div>
 
-<!-- 동기화 정보 및 서프라이즈 농장 -->
 <div id="last-sync-time" class="sync-time"></div>
-<div id="farm-panel" class="farm-panel hidden"></div>
+<div id="farm-panel" class="farm-panel" style="display:none;"></div>
 
-<!-- 신규 항목 추가 FAB 및 효과 레이어 -->
 <button id="fab" title="항목 추가">+</button>
 <div id="confetti-layer"></div>
 
