@@ -404,42 +404,30 @@
         if(!zone) return;
 
         const currentDisplayPhase = parseInt(btn.dataset.prog);
-        const days = btn.dataset.days === "null" ? null : parseInt(btn.dataset.days);
         const now = Date.now();
 
-        let nextPhase = (currentDisplayPhase + 1) % 8;
+        // 🌚→🌒→🌓→🌔→🌝→🌖→🌗→🌘→🌚 한 방향으로 계속 전진
+        const nextPhase = (currentDisplayPhase + 1) % 8;
 
         let updateData = {
           currentPhase: nextPhase,
           healthUpdatedAt: now
         };
 
-        if (currentDisplayPhase === 4) {
-          // 🌝 보름달 → 취소(되돌리기) 의도
-          if (days === 0) {
-            let newHistory = [...(zone.history || [])];
-            newHistory.pop();
-
-            // ✅ FIX 5: lastCleaned 타입을 항상 숫자(ms) 또는 null로 통일
-            let newLastCleaned = null;
-            let newLastWho = "";
-            if (newHistory.length > 0) {
-              const prev = newHistory[newHistory.length - 1];
-              // 숫자면 그대로, Firestore Timestamp면 toMillis()로 변환
-              newLastCleaned = typeof prev === 'number' ? prev
-                             : (prev.toMillis ? prev.toMillis() : prev.seconds * 1000);
-              newLastWho = "이전 기록 복구됨";
-            }
-            updateData.lastCleaned = newLastCleaned;
-            updateData.history = newHistory;
-            updateData.lastWho = newLastWho;
-          }
-        } else if (nextPhase === 4) {
-          // 🌔 → 🌝 정식 완료 처리
+        if (nextPhase === 4) {
+          // 🌔(3) → 🌝(4): 완료 기록
           updateData.lastCleaned = now;
           updateData.history = arrayUnion(now);
           updateData.lastWho = currentEmoji + currentRole;
           launchConfetti(btn.dataset.emoji || "🌝");
+
+        } else if (currentDisplayPhase === 4 && nextPhase === 5) {
+          // 🌝(4) → 🌖(5): 보름달 지나침 → 오늘 완료 기록은 유지, 위상만 전진
+
+        } else if (nextPhase === 0) {
+          // 🌘(7) → 🌚(0): 한 사이클 완전히 돌아 초기화
+          updateData.lastCleaned = null;
+          updateData.lastWho = "";
         }
 
         await updateDoc(doc(db, ZONES_COL, id), updateData);
