@@ -5,10 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
 <title>🤖 우리집 매니졀</title>
 
-<!-- 모바일 터치 드래그 앤 드롭을 위한 SortableJS 라이브러리 -->
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
 
-<!-- Firebase v10 CDN -->
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
   import {
@@ -44,7 +42,6 @@
   let collapsedGroups = JSON.parse(localStorage.getItem("hm_collapsed") || "{}"); 
   let openCommentIds = new Set();
   let zonesData    = [];
-  let rouletteActive = false;
 
   /* ── DOM 참조 ─────────────────────────────────── */
   const memberModal   = document.getElementById("member-modal");
@@ -135,41 +132,39 @@
       }
     });
 
+    // 🌟 오직 로그인한 본인한테만 이름 왼쪽에 개수 작게 노출!
     if (currentRole && counts[currentRole] > 0) {
       myTodayCountEl.innerText = `(${counts[currentRole]})`;
     } else {
       myTodayCountEl.innerText = `(0)`;
     }
 
+    // 🌟 활동왕 배너에서 미션 달성 개수 숫자는 비밀로 감춤 (다른 사람이 더 불타오르게! 🔥)
     if(maxCount > 0) {
-      kingBanner.innerHTML = `🏆 오늘의 활동왕: <strong>${kingEmoji} ${kingRole}</strong> (${maxCount}개 완료!)`;
+      kingBanner.innerHTML = `🏆 오늘의 활동왕: <strong>${kingEmoji} ${kingRole}</strong>`;
       kingBanner.classList.remove("hidden");
     } else {
       kingBanner.classList.add("hidden");
     }
 
-    // 🌟 한국 시간 밤 9시 기준 정산 로직 실행
+    // 한국 시간 밤 9시 기준 정산 로직 실행
     check9PMReward(kingRole, maxCount);
   }
 
   /* ── 🥚 한국 시간 밤 9시 기준 서프라이즈 시스템 ── */
   function check9PMReward(currentKing, maxCount) {
     const now = new Date();
-    // 한국 시간(KST) 시각 계산
     const kstOffset = 9 * 60 * 60 * 1000;
     const kstDate = new Date(now.getTime() + (now.getTimezoneOffset() * 60000) + kstOffset);
 
-    // 밤 9시(21시)를 기준으로 정산 회차 구분 ID 생성
     let periodDate = new Date(kstDate.getTime());
     if (kstDate.getHours() < 21) {
-      // 오늘 밤 9시 전이라면 '어제 밤 9시 ~ 오늘 밤 9시' 회차에 속하므로 어제 날짜를 ID로 씀
       periodDate.setDate(periodDate.getDate() - 1);
     }
-    const periodId = periodDate.toLocaleDateString('ko-KR'); // 예: "2026. 6. 24."
+    const periodId = periodDate.toLocaleDateString('ko-KR');
 
     const lastRewardedPeriod = localStorage.getItem("hm_last_reward_period");
 
-    // 회차가 새로 바뀌는 순간(밤 9시 정각이 지나서 처음 앱을 켰을 때) 정산 진행!
     if (lastRewardedPeriod && lastRewardedPeriod !== periodId) {
       const yesterdayKing = localStorage.getItem("hm_period_king");
       const yesterdayMax = parseInt(localStorage.getItem("hm_period_max") || "0");
@@ -182,7 +177,6 @@
       }
     }
 
-    // 현재의 실시간 1등 데이터를 이 회차의 마감 예비 스냅샷으로 계속 업데이트
     localStorage.setItem("hm_last_reward_period", periodId);
     localStorage.setItem("hm_period_king", currentKing || "");
     localStorage.setItem("hm_period_max", maxCount);
@@ -190,13 +184,11 @@
     renderFarm();
   }
 
-  // 7개 단위 무지성 이모지 나열 스티커판 
   function renderFarm() {
     let eggs = parseInt(localStorage.getItem("hm_farm_eggs") || "0");
     let chicks = parseInt(localStorage.getItem("hm_farm_chicks") || "0");
     let chickens = parseInt(localStorage.getItem("hm_farm_chickens") || "0");
 
-    // 🌟 7마리(개)마다 진화!
     if (eggs >= 7) {
       const newChicks = Math.floor(eggs / 7);
       chicks += newChicks;
@@ -205,8 +197,8 @@
       localStorage.setItem("hm_farm_eggs", eggs);
     }
     if (chicks >= 7) {
-      const newChickens = Math.floor(chicks / 7);
-      chickens += newChickens;
+      const newChickenens = Math.floor(chicks / 7);
+      chickens += newChickenens;
       chicks = chicks % 7;
       localStorage.setItem("hm_farm_chickens", chickens);
       localStorage.setItem("hm_farm_chicks", chicks);
@@ -663,7 +655,8 @@
   .header-title { font-size: 1.15rem; font-weight: 800; }
   .member-control { display: flex; align-items: center; gap: 4px; }
   #member-badge { font-size: .9rem; font-weight: 700; }
-  #my-today-count { font-size: 0.8rem; color: var(--blue); font-weight: 800; margin-right: 4px; }
+  /* 🌟 나만의 비밀 카운트 스타일 (작고 소중하게 상단에만 노출) */
+  #my-today-count { font-size: 0.8rem; color: var(--blue); font-weight: 800; margin-right: 2px; opacity: 0.85; }
   #change-member-btn { font-size: .75rem; background: var(--bg); border: none; border-radius: 6px; padding: 4px 8px; cursor: pointer; color: var(--sub); }
 
   /* ── King Banner ──────────────────────────────── */
@@ -730,10 +723,8 @@
   .empty-state { text-align: center; padding: 50px 20px; color: var(--sub); }
   .empty-icon { font-size: 3rem; display: block; margin-bottom: 12px; }
 
-  /* 하단 동기화 */
   .sync-time { text-align: center; font-size: 0.75rem; color: #BDC3C7; margin-top: 15px; margin-bottom: 4px; font-weight: 600; }
 
-  /* 🌟 설명 없는 무지성 깜짝 리워드판 */
   .farm-panel { text-align: center; font-size: 1.7rem; padding: 10px; margin: 10px 16px 35px; }
   .farm-panel b { display: inline-block; margin: 0 3px; animation: eggPop 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; }
   .farm-panel.hidden { display: none; }
