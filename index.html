@@ -3,17 +3,19 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<!-- 모바일 앱처럼 보이게 하는 필수 태그들 -->
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="default" />
 <meta name="apple-mobile-web-app-title" content="우리집 매니졀" />
 <title>🤖 우리집 매니졀</title>
 
+<!-- 홈 화면 추가용 로봇 이모지 아이콘 자동 생성기 -->
 <script>
   const canvas = document.createElement('canvas');
   canvas.width = 192;
   canvas.height = 192;
   const ctx = canvas.getContext('2d');
-  ctx.fillStyle = '#FFFFFF'; // 아이콘 배경색 (깔끔한 흰색)
+  ctx.fillStyle = '#FFFFFF';
   ctx.fillRect(0, 0, 192, 192);
   ctx.font = '120px sans-serif';
   ctx.textAlign = 'center';
@@ -32,14 +34,16 @@
   document.head.appendChild(linkApple);
 </script>
 
+<!-- 모바일 터치 드래그 앤 드롭을 위한 SortableJS 라이브러리 -->
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
 
+<!-- Firebase v10 CDN -->
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
   import {
     getFirestore, collection, doc,
     addDoc, updateDoc, deleteDoc,
-    onSnapshot, arrayUnion, serverTimestamp, Timestamp
+    onSnapshot, arrayUnion
   } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
   /* ====================================================
@@ -62,6 +66,7 @@
   /* ── 역할 및 상수 설정 ───────────────────────────── */
   const ROLES = ["아빠", "엄마", "미네"];
   const PENALTY_EMOJIS = ["🙄","😛","😜","🤪","😶","🤨","🤔","🤫","🫣","🫩","😵‍💫","🤢","🤮","😠","😡","🤬","👿","☠️"];
+  
   // 0:텅빔(🌚) ~ 4:완료(🌝) ~ 7:거의다기움(🌘)
   const MOON_PHASES = ["🌚", "🌒", "🌓", "🌔", "🌝", "🌖", "🌗", "🌘"]; 
 
@@ -121,39 +126,34 @@
     renderZones();
   });
 
-  /* ── 달(진척도) 계산 핵심 로직 (시간 경과 적용) ──── */
-  function getZoneHealth(zone) {
+  /* ── 달 위상 계산 ──────────────────────────────── */
+  function getDisplayPhase(zone) {
     const now = Date.now();
-    let baseHealth = 0.0;
-    let baseTime = now;
-
-    if (zone.healthUpdatedAt !== undefined) {
-      baseHealth = zone.currentHealth !== undefined ? zone.currentHealth : 0.0;
-      baseTime = zone.healthUpdatedAt.toMillis ? zone.healthUpdatedAt.toMillis() : zone.healthUpdatedAt;
-    } else if (zone.lastCleaned) {
-      baseHealth = 4.0; // 과거 데이터 호환 (완료=🌝)
-      baseTime = zone.lastCleaned.toMillis ? zone.lastCleaned.toMillis() : zone.lastCleaned;
-    } else {
-      baseHealth = 0.0; // 새 항목 (텅빔=🌚)
-      baseTime = zone.createdAt ? (zone.createdAt.toMillis ? zone.createdAt.toMillis() : zone.createdAt) : now;
+    let basePhase = zone.currentPhase !== undefined ? zone.currentPhase : 0;
+    
+    // serverTimestamp 에러 방지를 위해 숫자로 바로 변환
+    let baseTime = zone.healthUpdatedAt || now;
+    if (typeof baseTime !== 'number') {
+      baseTime = baseTime.toMillis ? baseTime.toMillis() : now;
     }
-
-    const daysElapsed = (now - baseTime) / 86400000;
+    
+    const days = (now - baseTime) / 86400000;
     const cycle = zone.cycle || 1;
-    let actualHealth = baseHealth;
-
-    // 주기에 비례하여 4단계에 걸쳐 깎여나감
-    if (baseHealth >= 4) {
-      // 🌝(4) -> 🌖(5) -> 🌗(6) -> 🌘(7) -> 🌚(8==0) 방향으로 기움
-      actualHealth = baseHealth + (daysElapsed / cycle) * 4.0;
-      if (actualHealth >= 8) actualHealth = 0; 
+    const decay = (days / cycle) * 4.0; // 목표 주기에 맞춰 4단계로 깎여나감
+    
+    if (basePhase === 0) return 0;
+    
+    if (basePhase >= 4) {
+      // 🌝(4) 이상일 때 방치하면 🌖(5) -> 🌗(6) -> 🌘(7) -> 🌚(0) 순서로 깎임
+      let p = basePhase + decay;
+      if (p >= 8) return 0;
+      return Math.floor(p);
     } else {
-      // 🌔(3) 이하일 때도 방치하면 🌚(0)으로 서서히 기움
-      actualHealth = baseHealth - (daysElapsed / cycle) * 4.0;
-      if (actualHealth <= 0) actualHealth = 0; 
+      // 🌔(3) 이하로 차오르던 중 방치하면 다시 🌚(0)으로 스르륵 깎임
+      let p = basePhase - decay;
+      if (p <= 0) return 0;
+      return Math.floor(p);
     }
-
-    return actualHealth;
   }
 
   /* ── 경과일 계산 ──────────────────────────────── */
@@ -264,13 +264,11 @@
     listEl.className = `group-list ${isCollapsed ? 'hidden' : ''}`;
 
     zones.forEach(zone => {
-      const actualHealth = getZoneHealth(zone);
-      const moonLevel = Math.floor(actualHealth); // 0(🌚) ~ 7(🌘)
-      
+      const moonLevel = getDisplayPhase(zone); // 0(🌚) ~ 7(🌘)
       const days = daysSince(zone.lastCleaned);
       const cycle = zone.cycle || 1;
       
-      // 달이 완전히 시커멓게 비었으면(🌚 == 0) 연체로 간주!
+      // 달이 완전히 시커멓고, 주기도 지났으면 연체!
       const overdue = (moonLevel === 0 && days !== null && days > cycle);
 
       let statusEmoji = "";
@@ -282,7 +280,6 @@
         dayLabel = "오늘 완료 😎";
       } else {
         dayLabel = `D+${days}`;
-        // 방치되어 🌚가 되고 주기가 넘어가면 연체 이모지 부착
         if (overdue) {
           let pIndex = (days - cycle) - 1;
           pIndex = Math.max(0, Math.min(pIndex, PENALTY_EMOJIS.length - 1));
@@ -302,7 +299,6 @@
       const hasComments = Object.keys(commentsObj).length > 0;
 
       const card = document.createElement("div");
-      // 🌝 보름달이면서 오늘 치운 경우에만 초록 테두리 표시
       card.className = `zone-card ${overdue ? "overdue" : ""} ${moonLevel===4 && days===0 ? "cleared" : ""}`;
       card.dataset.id = zone.id; 
       
@@ -372,39 +368,56 @@
       });
     }
 
-    /* ── 🌟 달님 버튼 클릭 이벤트 로직 ── */
+    /* ── 🌟 달님 버튼 클릭 핵심 로직 ── */
     listEl.querySelectorAll(".progress-btn").forEach(btn => {
       btn.onclick = async () => {
         if (!currentRole) { alert("먼저 멤버를 설정해 주세요!"); return; }
         vibrateShort();
         
-        const id = btn.dataset.id;
-        const currentLevel = parseInt(btn.dataset.prog); // 0 ~ 7
-        const days = btn.dataset.days === "null" ? null : parseInt(btn.dataset.days);
-        
-        // 버튼을 누르면 무조건 다음 단계로 1칸 이동 (0->1->2...7->0)
-        let nextLevel = (currentLevel + 1) % 8;
+        // 깜빡임(Flicker) 방지를 위해 버튼을 아주 짧게 무효화
+        btn.disabled = true; 
+        setTimeout(() => { btn.disabled = false; }, 300);
 
-        if (currentLevel === 4) {
-          // 🌝 보름달일 때 눌렀다면? -> "취소(되돌리기)" 의도로 판단하고 🌖(5)로 넘김
+        const id = btn.dataset.id;
+        const zone = zonesData.find(z => z.id === id);
+        if(!zone) return;
+
+        const currentDisplayPhase = parseInt(btn.dataset.prog); 
+        const days = btn.dataset.days === "null" ? null : parseInt(btn.dataset.days);
+        const now = Date.now();
+        
+        // 무조건 누를 때마다 오른쪽으로 전진! (0->1->2...7->0)
+        let nextPhase = (currentDisplayPhase + 1) % 8;
+
+        let updateData = {
+          currentPhase: nextPhase,
+          healthUpdatedAt: now // 깜빡임 방지를 위해 Date.now() 로컬 시간 사용
+        };
+
+        if (currentDisplayPhase === 4) {
+          // 보름달(🌝)을 눌렀을 때 -> "취소(되돌리기)" 의도로 판단하고 🌖(5)로 넘김
           if (days === 0) {
-            undoClear(id); // 오늘 완료한 거라면 완료 기록도 지워줌
-          } else {
-            await updateDoc(doc(db, ZONES_COL, id), {
-              currentHealth: 5.0,
-              healthUpdatedAt: serverTimestamp()
-            });
+            let newHistory = [...(zone.history || [])];
+            newHistory.pop(); // 방금 완료한 기록 삭제
+            let newLastCleaned = null;
+            let newLastWho = "";
+            if (newHistory.length > 0) {
+              newLastCleaned = newHistory[newHistory.length - 1];
+              newLastWho = "이전 기록 복구됨";
+            }
+            updateData.lastCleaned = newLastCleaned;
+            updateData.history = newHistory;
+            updateData.lastWho = newLastWho;
           }
-        } else if (nextLevel === 4) {
-          // 🌔(3)에서 눌러서 🌝(4)가 되었다면? -> "정식 완료" 처리!
-          clearZone(id, btn.dataset.emoji);
-        } else {
-          // 그 외의 경우 (차오르거나 기우는 도중) -> 그냥 다음 달 모양으로 업데이트
-          await updateDoc(doc(db, ZONES_COL, id), {
-            currentHealth: nextLevel,
-            healthUpdatedAt: serverTimestamp()
-          });
+        } else if (nextPhase === 4) {
+          // 🌔(3)에서 눌러서 🌝(4)가 되었을 때 -> "정식 완료" 처리!
+          updateData.lastCleaned = now;
+          updateData.history = arrayUnion(now);
+          updateData.lastWho = currentEmoji + currentRole;
+          launchConfetti(btn.dataset.emoji || "🌝");
         }
+
+        await updateDoc(doc(db, ZONES_COL, id), updateData);
       };
     });
 
@@ -426,42 +439,7 @@
     });
   }
 
-  /* ── 기능 함수들 ──────────────────────────────── */
-  async function clearZone(id, emoji) {
-    const now = Date.now();
-    await updateDoc(doc(db, ZONES_COL, id), {
-      lastCleaned: Timestamp.fromMillis(now),
-      lastWho:     `${currentEmoji}${currentRole}`,
-      history:     arrayUnion(now),
-      currentHealth: 4.0, // 보름달 고정
-      healthUpdatedAt: serverTimestamp()
-    });
-    launchConfetti(emoji);
-  }
-
-  async function undoClear(id) {
-    const zone = zonesData.find(z => z.id === id);
-    if (!zone) return;
-    
-    let newHistory = [...(zone.history || [])];
-    newHistory.pop(); // 최근 완료 기록 삭제
-    
-    let newLastCleaned = null;
-    let newLastWho = "";
-    if (newHistory.length > 0) {
-      newLastCleaned = Timestamp.fromMillis(newHistory[newHistory.length - 1]);
-      newLastWho = "이전 기록 복구됨";
-    }
-
-    await updateDoc(doc(db, ZONES_COL, id), {
-      lastCleaned: newLastCleaned,
-      history: newHistory,
-      lastWho: newLastWho,
-      currentHealth: 5.0, // 🌖 상태로 넘김
-      healthUpdatedAt: serverTimestamp()
-    });
-  }
-
+  /* ── 기타 기능 함수들 ────────────────────────────── */
   async function updateComment(id, text) {
     if (!currentRole) { alert("먼저 멤버를 설정해 주세요!"); return; }
     const zone = zonesData.find(z => z.id === id);
@@ -537,8 +515,8 @@
       await addDoc(collection(db, ZONES_COL), {
         name, category, emoji, cycle, assignee,
         order: Date.now(),
-        lastCleaned: null, lastWho: "", history: [], comments: {}, currentHealth: 0.0,
-        createdAt: serverTimestamp(),
+        lastCleaned: null, lastWho: "", history: [], comments: {}, currentPhase: 0,
+        createdAt: Date.now(),
       });
     }
     addForm.reset();
@@ -549,8 +527,8 @@
   rouletteBtn.onclick = () => {
     if (rouletteActive || zonesData.length === 0) return;
     const candidates = zonesData.filter(z => {
-      const actualHealth = getZoneHealth(z);
-      return Math.floor(actualHealth) !== 4; // 🌝(4)가 아닌 항목만 추천
+      const actualHealth = getDisplayPhase(z);
+      return actualHealth !== 4; // 🌝(4)가 아닌 항목만 추천
     });
     const pool = candidates.length ? candidates : zonesData;
     let idx = 0, spins = 0, total = 14;
@@ -827,6 +805,7 @@
 </head>
 <body>
 
+<!-- 역할 설정 모달 -->
 <div class="modal-overlay hidden" id="member-modal">
   <div class="modal-sheet">
     <p class="modal-title">👋 내 역할과 이모지 선택</p>
@@ -842,6 +821,7 @@
   </div>
 </div>
 
+<!-- 추가/수정 모달 -->
 <div class="modal-overlay hidden" id="add-modal">
   <div class="modal-sheet">
     <p class="modal-title" id="modal-title">항목 추가</p>
@@ -877,6 +857,7 @@
   </div>
 </div>
 
+<!-- 헤더 -->
 <header>
   <div class="header-row">
     <span class="header-title">🤖 우리집 매니졀</span>
@@ -887,17 +868,22 @@
   </div>
 </header>
 
+<!-- 활동왕 랭킹 배너 -->
 <div id="king-banner" class="hidden"></div>
 
+<!-- 랜덤 룰렛 -->
 <div class="roulette-wrap">
   <button id="roulette-btn">🎲 오늘 뭐 할까? (랜덤 뽑기)</button>
   <div id="roulette-card" class="hidden"></div>
 </div>
 
+<!-- 항목 목록 -->
 <div id="zones"></div>
 
+<!-- FAB -->
 <button id="fab" title="항목 추가">+</button>
 
+<!-- 폭죽 레이어 -->
 <div id="confetti-layer"></div>
 
 </body>
