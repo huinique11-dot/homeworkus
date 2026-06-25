@@ -46,7 +46,7 @@
   
   let zonesData    = [];
   let dailyClicksData = {};
-  let eggsData = { lastAwardedDate: "", retroactiveDone: false };
+  let eggsData = { lastAwardedDate: "", retroactiveDone: false, retroactiveDone_v2: false };
   
   let rouletteActive = false;
 
@@ -61,6 +61,7 @@
   const rouletteBtn   = document.getElementById("roulette-btn");
   const rouletteCard  = document.getElementById("roulette-card");
   const zonesEl       = document.getElementById("zones");
+  const eggFarmEl     = document.getElementById("egg-farm"); // 맨 밑의 나만의 농장
   const addModal      = document.getElementById("add-modal");
   const addForm       = document.getElementById("add-form");
   const fab           = document.getElementById("fab");
@@ -81,48 +82,61 @@
     localStorage.setItem("hm_emoji", currentEmoji);
     memberModal.classList.add("hidden");
     updateMemberBadge();
+    updateEggFarm();
     renderZones();
   };
 
-  /* ── 🐣 진화 계산 및 뱃지 업데이트 ── */
+  /* ── 🐣 진화 계산 (글자 없이 이모지만 나열) ── */
   function getEvolutionStr(totalEggs) {
-    if (!totalEggs || totalEggs <= 0) return "🥚 0";
+    if (!totalEggs || totalEggs <= 0) return "";
     const chickens = Math.floor(totalEggs / 49);
     const chicks = Math.floor((totalEggs % 49) / 7);
     const eggs = totalEggs % 7;
     
-    let res = [];
-    if (chickens > 0) res.push(`🐔 ${chickens}`);
-    if (chicks > 0) res.push(`🐣 ${chicks}`);
-    if (eggs > 0 || (chickens === 0 && chicks === 0)) res.push(`🥚 ${eggs}`);
-    return res.join(" ");
+    let res = "";
+    for(let i=0; i<chickens; i++) res += "🐔 ";
+    for(let i=0; i<chicks; i++) res += "🐣 ";
+    for(let i=0; i<eggs; i++) res += "🥚 ";
+    return res.trim(); // "🐣 🥚 🥚" 형식으로 표시
   }
 
+  // 상단 바 UI (깔끔하게 복구)
   function updateMemberBadge() {
     if(currentRole && currentEmoji) {
-      let myTotalEggs = eggsData[currentRole] || 0;
-      let evoStr = getEvolutionStr(myTotalEggs);
       let todayClicks = dailyClicksData[currentRole] || 0;
-      
-      memberBadge.innerHTML = `${currentEmoji} ${currentRole} <span class="header-count">${evoStr}</span> <span class="header-clicks">(오늘 ${todayClicks}클릭)</span>`;
+      memberBadge.innerHTML = `${currentEmoji} ${currentRole} <span class="header-clicks">(오늘 ${todayClicks}클릭)</span>`;
+    }
+  }
+
+  // 화면 맨 아래 달걀 농장 업데이트
+  function updateEggFarm() {
+    if(currentRole) {
+      let myTotalEggs = eggsData[currentRole] || 0;
+      if (myTotalEggs > 0) {
+        eggFarmEl.innerHTML = getEvolutionStr(myTotalEggs);
+        eggFarmEl.classList.remove("hidden");
+      } else {
+        eggFarmEl.classList.add("hidden");
+      }
     }
   }
 
   document.getElementById("change-member-btn").onclick = renderMemberModal;
 
-  /* ── 🥚 과거 누락 데이터 소급 및 밤 9시 1계란 보상 ── */
+  /* ── 🥚 밸런스 패치 및 밤 9시 1계란 보상 ── */
   async function runRetroactiveAndRewardCheck() {
     const todayStr = new Date().toISOString().split('T')[0];
     const eggsRef = doc(db, "stats", "eggs");
     const eggsSnap = await getDoc(eggsRef);
-    let currentEggs = eggsSnap.exists() ? eggsSnap.data() : { lastAwardedDate: "", retroactiveDone: false };
+    let currentEggs = eggsSnap.exists() ? eggsSnap.data() : { lastAwardedDate: "", retroactiveDone: false, retroactiveDone_v2: false };
 
-    // 1. [소급 적용] 미네가 그동안 놓친 계란들을 한 번에 지급 (28알 = 병아리 4마리 분량)
-    if (!currentEggs.retroactiveDone) {
-      currentEggs["미네"] = (currentEggs["미네"] || 0) + 28; // 미네의 밀린 계란 지급
-      currentEggs["아빠"] = (currentEggs["아빠"] || 0) + 2;
-      currentEggs["엄마"] = (currentEggs["엄마"] || 0) + 3;
-      currentEggs.retroactiveDone = true;
+    // 1. [긴급 패치] 어제 제가 28개씩 퍼줬던 오류를 바로잡습니다. 
+    // 누구나 시작은 덩그러니 달걀 1개부터!
+    if (!currentEggs.retroactiveDone_v2) {
+      currentEggs["미네"] = 1; 
+      currentEggs["아빠"] = 1;
+      currentEggs["엄마"] = 1;
+      currentEggs.retroactiveDone_v2 = true;
       await setDoc(eggsRef, currentEggs);
     }
 
@@ -139,18 +153,19 @@
       }
       
       if (todayKing) {
-        currentEggs[todayKing] = (currentEggs[todayKing] || 0) + 1; // 딱 1개만 지급
+        currentEggs[todayKing] = (currentEggs[todayKing] || 0) + 1; // 하루에 딱 1개만 지급!
         currentEggs.lastAwardedDate = todayStr;
         await setDoc(eggsRef, currentEggs);
         
         if (currentRole === todayKing) {
           launchConfetti("🥚");
-          alert(`🎉 [정산 완료] 오늘의 활동왕 [${todayKing}]님에게 보상 달걀 🥚 1개가 지급되었습니다!`);
+          alert(`🎉 [정산 완료] 오늘의 활동왕 [${todayKing}]님 농장에 달걀 🥚 1개가 추가되었습니다!`);
         }
       }
     }
     eggsData = currentEggs;
     updateMemberBadge();
+    updateEggFarm();
   }
 
   /* ── 📊 실시간 클릭 카운트 누적 ── */
@@ -193,6 +208,7 @@
     if (d.exists()) {
       eggsData = d.data();
       updateMemberBadge();
+      updateEggFarm();
     }
   });
 
@@ -628,8 +644,12 @@
   function vibrateShort() { try { if (navigator.vibrate) navigator.vibrate(50); } catch(_) {} }
 
   /* ── 초기 진입 ──────────────────────────────────── */
-  if (currentRole) updateMemberBadge();
-  else renderMemberModal();
+  if (currentRole) {
+    updateMemberBadge();
+    updateEggFarm();
+  } else {
+    renderMemberModal();
+  }
 
   addModal.addEventListener("click", e => {
     if (e.target === addModal) addModal.classList.add("hidden");
@@ -665,7 +685,7 @@
     overflow-x: hidden;
   }
 
-  /* ── Header ──────────────────────────────────── */
+  /* ── Header (깔끔하게 원래대로 복구) ── */
   header {
     background: #fff;
     padding: 16px 20px;
@@ -676,16 +696,15 @@
   }
 
   .header-row { display: flex; align-items: center; justify-content: space-between; }
-  .header-title { font-size: 1.15rem; font-weight: 800; }
-  .member-control { display: flex; align-items: center; gap: 8px; }
+  .header-title { font-size: 1.15rem; font-weight: 800; white-space: nowrap; }
+  .member-control { display: flex; align-items: center; gap: 8px; flex-wrap: nowrap; }
   
-  #member-badge { font-size: .95rem; font-weight: 700; display: flex; align-items: center; gap: 4px; }
-  .header-count { color: #E67E22; font-size: .75rem; font-weight: 800; background: #FDF2E9; padding: 2px 6px; border-radius: 6px; border: 1px solid #F5CBA7; }
-  .header-clicks { color: var(--blue); font-size: .7rem; font-weight: 600; opacity: 0.8; }
+  #member-badge { font-size: .95rem; font-weight: 700; display: flex; align-items: center; gap: 4px; white-space: nowrap; }
+  .header-clicks { color: var(--blue); font-size: .75rem; font-weight: 600; background: #EBF5FB; padding: 3px 6px; border-radius: 6px; white-space: nowrap;}
 
   #change-member-btn {
     font-size: .75rem; background: var(--bg); border: none;
-    border-radius: 6px; padding: 6px 10px; cursor: pointer; color: var(--sub); font-weight: 600;
+    border-radius: 6px; padding: 6px 10px; cursor: pointer; color: var(--sub); font-weight: 600; flex-shrink: 0;
   }
 
   /* ── King Banner ──────────────────────────────── */
@@ -838,12 +857,23 @@
   .empty-state { text-align: center; padding: 60px 20px; color: var(--sub); }
   .empty-icon { font-size: 3.5rem; display: block; margin-bottom: 16px; }
 
+  /* ── 🌾 나만의 농장 (맨 아래 표시) ─────────────────────── */
+  .egg-farm {
+    text-align: center;
+    padding: 20px;
+    margin-top: 10px;
+    margin-bottom: 10px;
+    font-size: 1.8rem;
+    letter-spacing: 4px;
+    user-select: none;
+    min-height: 40px;
+  }
+
   /* ── 🔄 동기화 시간 표시 ─────────────────────── */
   .sync-time {
     text-align: center;
     font-size: 0.75rem;
     color: #9CA3AF;
-    margin-top: 20px;
     margin-bottom: 40px;
     font-weight: 600;
   }
@@ -990,6 +1020,8 @@
 </div>
 
 <div id="zones"></div>
+
+<div id="egg-farm" class="egg-farm hidden"></div>
 
 <div id="last-sync-time" class="sync-time"></div>
 
