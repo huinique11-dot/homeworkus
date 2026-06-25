@@ -5,15 +5,13 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
 <title>🤖 우리집 매니졀</title>
 
-<!-- 모바일 터치 드래그 앤 드롭을 위한 SortableJS 라이브러리 -->
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
 
-<!-- Firebase v10 CDN -->
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
   import {
     getFirestore, collection, doc,
-    addDoc, updateDoc, deleteDoc,
+    addDoc, updateDoc, deleteDoc, setDoc, getDoc,
     onSnapshot, arrayUnion, serverTimestamp, Timestamp
   } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
@@ -36,8 +34,6 @@
   /* ── 역할 목록 및 이모지 배열 ──────────────────── */
   const ROLES = ["아빠", "엄마", "미네"];
   const PENALTY_EMOJIS = ["🙄","😛","😜","🤪","😶","🤨","🤔","🤫","🫣","🫩","😵‍💫","🤢","🤮","😠","😡","🤬","👿","☠️"];
-  
-  // 과학적인 8단계 달의 위상 순환
   const ALL_MOONS = ["🌑", "🌒", "🌓", "🌔", "🌝", "🌖", "🌗", "🌘"];
 
   /* ── 상태 ─────────────────────────────────────── */
@@ -45,7 +41,11 @@
   let currentEmoji = localStorage.getItem("hm_emoji") || null;
   let collapsedGroups = JSON.parse(localStorage.getItem("hm_collapsed") || "{}"); 
   let openCommentIds = new Set();
+  
   let zonesData    = [];
+  let dailyClicksData = { "아빠": 0, "엄마": 0, "미네": 0 };
+  let eggsData = { "아빠": 0, "엄마": 0, "미네": 0, lastAwardedDate: "", retroactiveDone: false };
+  
   let rouletteActive = false;
 
   /* ── DOM 참조 ─────────────────────────────────── */
@@ -82,32 +82,112 @@
     renderZones();
   };
 
-  // 상단 내 이름 옆에 오늘 완료한 숫자 카운트 표시!
+  // 상단 프로필 옆에 획득한 계란(🥚) 개수 실시간 표시!
   function updateMemberBadge() {
     if(currentRole && currentEmoji) {
-      let myTodayCount = 0;
-      zonesData.forEach(z => {
-        if(daysSince(z.lastCleaned) === 0 && z.lastWho && z.lastWho.includes(currentRole)) {
-          myTodayCount++;
-        }
-      });
-      let countStr = myTodayCount > 0 ? ` <span class="header-count">(오늘 ${myTodayCount}건✨)</span>` : "";
-      memberBadge.innerHTML = `${currentEmoji} ${currentRole}${countStr}`;
+      let myEggs = eggsData[currentRole] || 0;
+      let todayClicks = dailyClicksData[currentRole] || 0;
+      memberBadge.innerHTML = `${currentEmoji} ${currentRole} <span class="header-count">🥚 ${myEggs}개</span> <span class="header-clicks">(오늘 ${todayClicks}클릭)</span>`;
     }
   }
 
   document.getElementById("change-member-btn").onclick = renderMemberModal;
 
-  /* ── Firestore 실시간 구독 및 동기화 시간 업데이트 ── */
+  /* ── 🥚 과거 데이터 전수조사 및 밤 9시 보상 시스템 ── */
+  async function runRetroactiveAndRewardCheck() {
+    const todayStr = new Date().toISOString().split('T')[0];
+    
+    // 1. 계란 데이터 가져오기
+    const eggsRef = doc(db, "stats", "eggs");
+    const eggsSnap = await getDoc(eggsRef);
+    let currentEggs = eggsSnap.exists() ? eggsSnap.data() : { "아빠": 0, "엄마": 0, "미네": 0, lastAwardedDate: "", retroactiveDone: false };
+
+    // 2. [소급 적용] 처음 시작할 때부터의 이력을 싹 다 뒤져서 미네 계란 챙겨주기!
+    if (!currentEggs.retroactiveDone) {
+      let totalHistoryCount = 0;
+      zonesData.forEach(z => {
+        if (z.history) totalHistoryCount += z.history.length;
+      });
+      // 그동안 미네가 놓친 기여도와 날짜를 고려해 아주 넉넉하게 계란 보상 정산 (최소 28개 보장)
+      currentEggs["미네"] = Math.max(28, totalHistoryCount * 2);
+      currentEggs["아빠"] = 2;
+      currentEggs["엄마"] = 3;
+      currentEggs.retroactiveDone = true;
+      await setDoc(eggsRef, currentEggs);
+    }
+
+    // 3. [밤 9시 보상 체크] 21시 이후이고, 오늘 아직 계란 지급이 안 되었다면 자동 지급!
+    const now = new Date();
+    if (now.getHours() >= 21 && currentEggs.lastAwardedDate !== todayStr) {
+      let maxClicks = 0;
+      let todayKing = null;
+      for (const role in dailyClicksData) {
+        if (dailyClicksData[role] > maxClicks) {
+          maxClicks = dailyClicksData[role];
+          todayKing = role;
+        }
+      }
+      // 오늘 클릭 기여도가 가장 높은 사람에게 계란 보상!
+      if (todayKing) {
+        currentEggs[todayKing] = (currentEggs[todayKing] || 0) + 1;
+        currentEggs.lastAwardedDate = todayStr;
+        await setDoc(eggsRef, currentEggs);
+        
+        if (currentRole === todayKing) {
+          launchConfetti("🥚");
+          alert(`🎉 [밤 9시 정각 보상] 오늘 기여도가 가장 높은 활동왕 [${todayKing}]님에게 보상 계란 🥚1개가 지급되었습니다!`);
+        }
+      }
+    }
+    eggsData = currentEggs;
+    updateMemberBadge();
+  }
+
+  /* ── 📊 실시간 클릭 카운트 추적 ── */
+  async function trackClickContribution() {
+    if (!currentRole) return;
+    const todayStr = new Date().toISOString().split('T')[0];
+    let updatedClicks = { ...dailyClicksData };
+    updatedClicks[currentRole] = (updatedClicks[currentRole] || 0) + 1;
+    
+    await setDoc(doc(db, "stats", "today"), {
+      date: todayStr,
+      clicks: updatedClicks
+    });
+  }
+
+  /* ── Firestore 실시간 구독 ── */
+  // 1. 항목 리스트 구독
   onSnapshot(collection(db, ZONES_COL), snap => {
     zonesData = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     zonesData.sort((a, b) => (a.order || 0) - (b.order || 0));
     renderZones();
-    updateMemberBadge(); 
+    if (zonesData.length > 0) runRetroactiveAndRewardCheck();
     
     const now = new Date();
     const timeStr = now.toLocaleDateString('ko-KR') + ' ' + now.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
     syncTimeEl.innerText = `🔄 최근 동기화: ${timeStr}`;
+  });
+
+  // 2. 오늘 클릭 수 구독
+  onSnapshot(doc(db, "stats", "today"), d => {
+    const todayStr = new Date().toISOString().split('T')[0];
+    if (d.exists()) {
+      const data = d.data();
+      if (data.date === todayStr) {
+        dailyClicksData = data.clicks || dailyClicksData;
+      }
+    }
+    updateKingBanner();
+    updateMemberBadge();
+  });
+
+  // 3. 누적 계란 수 구독
+  onSnapshot(doc(db, "stats", "eggs"), d => {
+    if (d.exists()) {
+      eggsData = d.data();
+      updateMemberBadge();
+    }
   });
 
   /* ── 경과일 계산 ──────────────────────────────── */
@@ -121,31 +201,19 @@
     return Math.floor((today - target) / 86400000);
   }
 
-  /* ── 오늘의 활동왕 계산 ────────────────────────── */
+  /* ── 오늘의 활동왕 배너 (클릭 수 기반으로 변경!) ── */
   function updateKingBanner() {
-    let counts = {};
-    ROLES.forEach(r => counts[r] = 0);
-    let maxCount = 0;
+    let maxClicks = 0;
     let kingRole = null;
-    let kingEmoji = "👑";
-
-    zonesData.forEach(z => {
-      if(daysSince(z.lastCleaned) === 0 && z.lastWho) {
-        ROLES.forEach(r => {
-          if(z.lastWho.includes(r)) {
-            counts[r]++;
-            if(counts[r] > maxCount) {
-              maxCount = counts[r];
-              kingRole = r;
-              kingEmoji = z.lastWho.replace(r, '').trim() || "👑";
-            }
-          }
-        });
+    for (const role in dailyClicksData) {
+      if (dailyClicksData[role] > maxClicks) {
+        maxClicks = dailyClicksData[role];
+        kingRole = role;
       }
-    });
+    }
 
-    if(maxCount > 0) {
-      kingBanner.innerHTML = `🏆 오늘의 활동왕: <strong>${kingEmoji} ${kingRole}</strong> (${maxCount}개 완료!)`;
+    if (kingRole && maxClicks > 0) {
+      kingBanner.innerHTML = `🏆 실시간 활동왕: <strong>👑 ${kingRole}</strong> (기여도: ${maxClicks}클릭) ➔ 밤 9시 🥚 지급 대기 중!`;
       kingBanner.classList.remove("hidden");
     } else {
       kingBanner.classList.add("hidden");
@@ -155,8 +223,6 @@
   /* ── 리스트 렌더링 ─────────────────────────── */
   function renderZones() {
     zonesEl.innerHTML = "";
-    updateKingBanner(); 
-
     if (zonesData.length === 0) {
       zonesEl.innerHTML = `<div class="empty-state"><span class="empty-icon">📝</span><p>아직 항목이 없어요.<br>+ 버튼으로 할 일을 추가해 보세요!</p></div>`;
       return;
@@ -201,7 +267,6 @@
 
   function renderGroupUI(title, zones) {
     const isCollapsed = collapsedGroups[title] || false;
-    
     const groupEl = document.createElement("div");
     groupEl.className = "zone-group";
     
@@ -228,6 +293,7 @@
       let statusEmoji = "";
       let dayLabel = "기록 없음";
 
+      /* 🌕 자동 방전 및 달 위상 계산 로직 */
       if (moonIndex === 4 && days !== null && days > 0) {
         if (days >= cycle) {
           moonIndex = 0; 
@@ -239,6 +305,7 @@
       }
       displayMoon = ALL_MOONS[moonIndex];
 
+      /* 🌟 상태(반짝이/페널티) 결정 로직 */
       if (days === null) {
         statusEmoji = ""; 
       } else if (days === 0) {
@@ -333,11 +400,11 @@
     }
   }
 
-  /* ── 🌟 통합 이벤트 위임 (달 위상 순환 완벽 처리) ── */
+  /* ── 🌟 통합 이벤트 위임 ── */
   zonesEl.addEventListener("click", async (e) => {
     const target = e.target;
 
-    // 1. 달(진행도) 버튼 클릭
+    // 1. 달(진행도) 버튼 클릭 -> 기여도 클릭 카운트 무조건 누적!
     const progBtn = target.closest(".progress-btn");
     if (progBtn) {
       e.stopPropagation();
@@ -349,7 +416,8 @@
       const nextIndex = (currentIndex + 1) % 8; 
 
       vibrateShort();
-      
+      await trackClickContribution(); // 📊 기여도 카운트 업!
+
       if (nextIndex === 4) {
         clearZone(id, progBtn.dataset.emoji);
       } else if (currentIndex === 4) {
@@ -402,6 +470,7 @@
       progress:    4 
     });
     launchConfetti("🌝");
+    runRetroactiveAndRewardCheck();
   }
 
   async function undoClearSilent(id, nextProgress) {
@@ -424,6 +493,7 @@
       lastWho: newLastWho,
       progress: nextProgress
     });
+    runRetroactiveAndRewardCheck();
   }
 
   async function updateComment(id, text) {
@@ -432,7 +502,6 @@
     if (!zone) return;
     
     const comments = (typeof zone.comments === 'object' && zone.comments !== null) ? { ...zone.comments } : {};
-    
     if (text.trim() === "") {
       delete comments[currentRole];
     } else {
@@ -449,7 +518,6 @@
 
   /* ── 추가/수정 모달 ────────────────────────────── */
   let editingId = null;
-
   fab.onclick = () => openAddModal();
 
   function openAddModal() {
@@ -609,8 +677,9 @@
   .header-title { font-size: 1.15rem; font-weight: 800; }
   .member-control { display: flex; align-items: center; gap: 8px; }
   
-  #member-badge { font-size: .95rem; font-weight: 700; display: flex; align-items: center; }
-  .header-count { color: var(--blue); font-size: .75rem; margin-left: 4px; font-weight: 800; background: #EBF5FB; padding: 2px 6px; border-radius: 6px; }
+  #member-badge { font-size: .95rem; font-weight: 700; display: flex; align-items: center; gap: 4px; }
+  .header-count { color: #E67E22; font-size: .75rem; font-weight: 800; background: #FDF2E9; padding: 2px 6px; border-radius: 6px; border: 1px solid #F5CBA7; }
+  .header-clicks { color: var(--blue); font-size: .7rem; font-weight: 600; opacity: 0.8; }
 
   #change-member-btn {
     font-size: .75rem; background: var(--bg); border: none;
@@ -788,7 +857,7 @@
   #fab:active { transform: scale(0.9); }
   @media (max-width: 480px) { #fab { right: 20px; } }
 
-  /* ── Modal Base (🌟 프리미엄 UI 디자인 개선) ── */
+  /* ── Modal Base ── */
   .modal-overlay {
     position: fixed; inset: 0; background: rgba(17, 24, 39, 0.4); backdrop-filter: blur(4px);
     display: flex; align-items: flex-end; justify-content: center; z-index: 100;
@@ -805,7 +874,7 @@
   @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
   .modal-title { font-size: 1.25rem; font-weight: 800; margin-bottom: 24px; text-align: center; color: #1F2937; }
 
-  /* ── Forms (🌟 더 부드럽고 넓어진 입력창) ── */
+  /* ── Forms ── */
   .form-group { margin-bottom: 16px; display: flex; flex-direction: column; gap: 6px; }
   .form-row { display: flex; gap: 12px; }
   .form-row .form-group { flex: 1; margin-bottom: 0; }
@@ -849,7 +918,6 @@
 </head>
 <body>
 
-<!-- 역할 설정 모달 -->
 <div class="modal-overlay hidden" id="member-modal">
   <div class="modal-sheet">
     <div class="modal-handle"></div>
@@ -866,7 +934,6 @@
   </div>
 </div>
 
-<!-- 추가/수정 모달 -->
 <div class="modal-overlay hidden" id="add-modal">
   <div class="modal-sheet">
     <div class="modal-handle"></div>
@@ -903,7 +970,6 @@
   </div>
 </div>
 
-<!-- 헤더 -->
 <header>
   <div class="header-row">
     <span class="header-title">🤖 우리집 매니졀</span>
@@ -914,25 +980,19 @@
   </div>
 </header>
 
-<!-- 활동왕 랭킹 배너 -->
 <div id="king-banner" class="hidden"></div>
 
-<!-- 랜덤 룰렛 -->
 <div class="roulette-wrap">
   <button id="roulette-btn">🎲 오늘 뭐 할까? (랜덤 뽑기)</button>
   <div id="roulette-card" class="hidden"></div>
 </div>
 
-<!-- 항목 목록 -->
 <div id="zones"></div>
 
-<!-- 🔄 최근 동기화 시각 표시 -->
 <div id="last-sync-time" class="sync-time"></div>
 
-<!-- FAB -->
 <button id="fab" title="항목 추가">+</button>
 
-<!-- 폭죽 레이어 -->
 <div id="confetti-layer"></div>
 
 </body>
