@@ -50,9 +50,10 @@
   
   let rouletteActive = false;
 
-  // 더블 탭 판정을 위한 타이머 변수
-  let moonClickTimer = null;
-  let lastMoonClickedId = null;
+  /* ── 스와이프 제어 변수 ────────────────────────── */
+  let pointerStartX = 0;
+  let currentSwipeBtn = null;
+  const SWIPE_THRESHOLD = 35; // 확실히 밀어야 동작하는 기준값 (픽셀)
 
   /* ── DOM 참조 ─────────────────────────────────── */
   const memberModal   = document.getElementById("member-modal");
@@ -145,6 +146,7 @@
     const eggsSnap = await getDoc(eggsRef);
     let currentEggs = eggsSnap.exists() ? eggsSnap.data() : { lastAwardedDate: "", retroactiveDone: false, retroactiveDone_v2: false };
 
+    // [긴급 패치] 누구나 시작은 덩그러니 달걀 1개부터!
     if (!currentEggs.retroactiveDone_v2) {
       currentEggs["미네"] = 1; 
       currentEggs["아빠"] = 1;
@@ -165,7 +167,7 @@
       }
       
       if (todayKing) {
-        currentEggs[todayKing] = (currentEggs[todayKing] || 0) + 1; 
+        currentEggs[todayKing] = (currentEggs[todayKing] || 0) + 1; // 딱 1개 지급!
         currentEggs.lastAwardedDate = todayStr;
         await setDoc(eggsRef, currentEggs);
         
@@ -180,13 +182,12 @@
     updateEggFarm();
   }
 
-  /* ── 📊 실시간 클릭 카운트 수정 (더블 탭 취소 대응을 위해 양수/음수 조절 가능하도록 변경) ── */
+  /* ── 📊 실시간 클릭 카운트 누적 (스와이프 시 증감 처리) ── */
   async function trackClickContribution(amount) {
     if (!currentRole) return;
     const todayStr = new Date().toISOString().split('T')[0];
     let updatedClicks = { ...dailyClicksData };
-    // 기여도가 음수로 떨어지지 않도록 보정
-    updatedClicks[currentRole] = Math.max(0, (updatedClicks[currentRole] || 0) + amount);
+    updatedClicks[currentRole] = Math.max(0, (updatedClicks[currentRole] || 0) + amount); // 마이너스 방지
     
     await setDoc(doc(db, "stats", "today"), {
       date: todayStr,
@@ -384,7 +385,12 @@
           </div>
           
           <div class="zone-actions">
-            <button class="action-btn progress-btn" data-id="${zone.id}" data-moon="${displayMoon}" data-emoji="${zone.emoji||"✨"}" title="진행상황">${displayMoon}</button>
+            <div class="action-btn swipe-moon-btn" data-id="${zone.id}" data-moon="${displayMoon}" data-emoji="${zone.emoji||"✨"}" title="좌우로 밀어주세요">
+              <span class="swipe-hint">-</span>
+              <span class="the-moon">${displayMoon}</span>
+              <span class="swipe-hint">+</span>
+            </div>
+            
             <button class="action-btn memo-btn ${hasComments ? 'has-memo' : ''}" data-id="${zone.id}" title="메모">💬</button>
             <button class="action-btn edit-btn" data-id="${zone.id}" title="수정">⚙️</button>
           </div>
@@ -419,7 +425,7 @@
         delayOnTouchOnly: true, 
         animation: 150,
         ghostClass: "sortable-ghost", 
-        filter: ".action-btn, .comment-input", 
+        filter: ".action-btn, .comment-input, .swipe-moon-btn", 
         preventOnFilter: false, 
         onEnd: async function () {
           const itemEls = Array.from(listEl.querySelectorAll('.zone-card'));
@@ -433,42 +439,11 @@
     }
   }
 
-  /* ── 🌟 통합 이벤트 위임 (싱글탭 vs 더블탭 분기 로직 적용) ── */
-  zonesEl.addEventListener("click", async (e) => {
+  /* ── 🌟 통합 이벤트 위임 (클릭은 메모/수정만, 달은 스와이프 전용) ── */
+  zonesEl.addEventListener("click", (e) => {
     const target = e.target;
 
-    // 1. 달(진행도) 버튼 제어
-    const progBtn = target.closest(".progress-btn");
-    if (progBtn) {
-      e.stopPropagation();
-      const id = progBtn.dataset.id;
-      const currentDisplayMoon = progBtn.dataset.moon; 
-      const emoji = progBtn.dataset.emoji;
-
-      // 더블 탭 판정 시스템 (220ms 내에 재클릭 시 취소 모드로 동작)
-      if (moonClickTimer && lastMoonClickedId === id) {
-        clearTimeout(moonClickTimer);
-        moonClickTimer = null;
-        lastMoonClickedId = null;
-        
-        // 🔄 더블 탭: 뒤로 한 칸 가고 기여도 점수 -1 차감!
-        await handleMoonDecrease(id, currentDisplayMoon, emoji);
-      } else {
-        if (moonClickTimer) clearTimeout(moonClickTimer);
-        lastMoonClickedId = id;
-        
-        moonClickTimer = setTimeout(async () => {
-          moonClickTimer = null;
-          lastMoonClickedId = null;
-          
-          // ➔ 싱글 탭: 앞으로 한 칸 가고 기여도 점수 +1 추가!
-          await handleMoonIncrease(id, currentDisplayMoon, emoji);
-        }, 220); 
-      }
-      return;
-    }
-
-    // 2. 수정 버튼 클릭
+    // 수정 버튼 클릭
     const editBtn = target.closest(".edit-btn");
     if (editBtn) {
       e.stopPropagation();
@@ -476,7 +451,7 @@
       return;
     }
 
-    // 3. 메모 토글 버튼 클릭
+    // 메모 토글 버튼 클릭
     const memoBtn = target.closest(".memo-btn");
     if (memoBtn) {
       e.stopPropagation();
@@ -493,49 +468,97 @@
     }
   });
 
-  /* ── 🌕 달 제어 처리 상세 스크립트 ── */
-  // 앞으로 차오르기 (기존 로직 유지)
-  async function handleMoonIncrease(id, currentDisplayMoon, emoji) {
-    let currentIndex = ALL_MOONS.indexOf(currentDisplayMoon);
-    if (currentIndex === -1) currentIndex = 0;
-    const nextIndex = (currentIndex + 1) % 8; 
-
-    try { if (navigator.vibrate) navigator.vibrate(15); } catch(_) {}
-    await trackClickContribution(1); // 오늘 기여도 +1
-
-    if (nextIndex === 4) {
-      clearZone(id, emoji);
-    } else if (currentIndex === 4) {
-      undoClearSilent(id, nextIndex);
-    } else {
-      await updateDoc(doc(db, ZONES_COL, id), { progress: nextIndex });
-    }
-  }
-
-  // 🔄 더블탭으로 뒤로 리와인드 (취소 기능)
-  async function handleMoonDecrease(id, currentDisplayMoon, emoji) {
-    let currentIndex = ALL_MOONS.indexOf(currentDisplayMoon);
-    if (currentIndex === -1) currentIndex = 0;
-    const prevIndex = (currentIndex - 1 + 8) % 8; 
-
-    // 취소할 때는 조금 더 긴 진동 피드백
-    try { if (navigator.vibrate) navigator.vibrate(35); } catch(_) {}
-    await trackClickContribution(-1); // 오늘 기여도 -1 차감!
-
-    if (currentIndex === 4) {
-      // 🌝 보름달 완료 상태에서 취소하면 -> 완료 기록 지우고 🌔(3)으로 복구
-      undoClearSilent(id, 3);
-    } else if (currentIndex === 5) {
-      //  Skipping 수습: 🌖에서 뒤로가면 다시 🌝 완료 상태로 재결합
-      clearZone(id, emoji);
-    } else {
-      await updateDoc(doc(db, ZONES_COL, id), { progress: prevIndex });
-    }
-  }
-
   zonesEl.addEventListener("change", (e) => {
     if (e.target.classList.contains("comment-input")) {
       updateComment(e.target.dataset.id, e.target.value);
+    }
+  });
+
+  /* ── 🌟 대망의 스와이프 제어 로직 (마우스 & 터치 완벽 지원) ── */
+  zonesEl.addEventListener('pointerdown', (e) => {
+    const btn = e.target.closest('.swipe-moon-btn');
+    if (btn) {
+      currentSwipeBtn = btn;
+      pointerStartX = e.clientX;
+      btn.style.transform = 'scale(0.95)'; // 누른 느낌 피드백
+      btn.setPointerCapture(e.pointerId); // 마우스가 벗어나도 이벤트를 놓치지 않음
+    }
+  });
+
+  zonesEl.addEventListener('pointermove', (e) => {
+    if (!currentSwipeBtn) return;
+    const theMoon = currentSwipeBtn.querySelector('.the-moon');
+    let moveX = e.clientX - pointerStartX;
+    
+    // 달이 활주로를 벗어나지 않도록 최대 이동거리 제한
+    if(moveX > 25) moveX = 25;
+    if(moveX < -25) moveX = -25;
+    
+    if (theMoon) theMoon.style.transform = `translateX(${moveX}px)`;
+  });
+
+  zonesEl.addEventListener('pointerup', async (e) => {
+    if (!currentSwipeBtn) return;
+    const btn = currentSwipeBtn;
+    const deltaX = e.clientX - pointerStartX;
+    
+    // UI 원상복구
+    btn.releasePointerCapture(e.pointerId);
+    btn.style.transform = '';
+    const theMoon = btn.querySelector('.the-moon');
+    if (theMoon) {
+      theMoon.style.transition = 'transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275)';
+      theMoon.style.transform = 'translateX(0px)';
+      setTimeout(() => { theMoon.style.transition = 'none'; }, 200);
+    }
+    
+    currentSwipeBtn = null;
+
+    // 스와이프 임계값(Threshold) 확인
+    if (Math.abs(deltaX) > SWIPE_THRESHOLD) {
+      const id = btn.dataset.id;
+      const currentDisplayMoon = btn.dataset.moon; 
+      const emoji = btn.dataset.emoji;
+      
+      let currentIndex = ALL_MOONS.indexOf(currentDisplayMoon);
+      if (currentIndex === -1) currentIndex = 0;
+
+      if (deltaX > 0) {
+        // 👉 오른쪽으로 스와이프 (플러스, 차오름)
+        const nextIndex = (currentIndex + 1) % 8; 
+        vibrateShort();
+        await trackClickContribution(1); // 기여도 +1
+
+        if (nextIndex === 4) {
+          clearZone(id, emoji);
+        } else if (currentIndex === 4) {
+          undoClearSilent(id, nextIndex);
+        } else {
+          updateDoc(doc(db, ZONES_COL, id), { progress: nextIndex });
+        }
+      } else {
+        // 👈 왼쪽으로 스와이프 (마이너스, 되감기)
+        const prevIndex = (currentIndex - 1 + 8) % 8; 
+        try { if (navigator.vibrate) navigator.vibrate(35); } catch(_) {} // 왼쪽은 살짝 더 강한 진동
+        await trackClickContribution(-1); // 기여도 -1 삭감
+
+        if (currentIndex === 4) {
+          undoClearSilent(id, 3);
+        } else if (currentIndex === 5) {
+          clearZone(id, emoji);
+        } else {
+          updateDoc(doc(db, ZONES_COL, id), { progress: prevIndex });
+        }
+      }
+    }
+  });
+
+  zonesEl.addEventListener('pointercancel', (e) => {
+    if(currentSwipeBtn) {
+      currentSwipeBtn.style.transform = '';
+      const theMoon = currentSwipeBtn.querySelector('.the-moon');
+      if (theMoon) theMoon.style.transform = '';
+      currentSwipeBtn = null;
     }
   });
 
@@ -701,7 +724,7 @@
     }
   }
 
-  function vibrateShort() { try { if (navigator.vibrate) navigator.vibrate(50); } catch(_) {} }
+  function vibrateShort() { try { if (navigator.vibrate) navigator.vibrate(20); } catch(_) {} }
 
   /* ── 초기 진입 ──────────────────────────────────── */
   if (currentRole) {
@@ -871,6 +894,23 @@
 
   .zone-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
   
+  /* 🌟 스와이프 전용 달 버튼 디자인 */
+  .swipe-moon-btn {
+    width: 82px; /* 활주로 길이 */
+    height: 42px; border-radius: 20px; border: 1px solid var(--border);
+    background: #FDFEFE; display: flex; align-items: center; justify-content: space-between;
+    padding: 0 10px; cursor: pointer; transition: transform .1s, background .15s;
+    user-select: none;
+    touch-action: pan-y; /* 수평 스크롤 방지 & 자바스크립트에 이벤트 온전 전달 */
+    box-shadow: inset 0 2px 4px rgba(0,0,0,0.02);
+  }
+  .swipe-hint {
+    font-size: 0.95rem; font-weight: 900; color: #D5D8DC; user-select: none;
+  }
+  .the-moon {
+    font-size: 1.45rem; pointer-events: none; /* 달이 이벤트를 가로채지 않게 방지 */
+  }
+
   .action-btn {
     width: 42px; height: 42px; border-radius: 10px; border: 1px solid var(--border);
     background: #F8F9F9; display: flex; align-items: center; justify-content: center;
@@ -878,8 +918,6 @@
     user-select: none;
   }
   .action-btn:active { transform: scale(0.85); background: #EAECEE; }
-  
-  .progress-btn { background: #fff; font-size: 1.5rem; } 
   
   .memo-btn { position: relative; }
   .memo-btn.has-memo::after {
