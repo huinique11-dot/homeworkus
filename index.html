@@ -53,7 +53,7 @@
   /* ── 스와이프 제어 변수 ────────────────────────── */
   let pointerStartX = 0;
   let currentSwipeBtn = null;
-  const SWIPE_THRESHOLD = 35; // 확실히 밀어야 동작하는 기준값 (픽셀)
+  const SWIPE_THRESHOLD = 30; // 살짝 줄여서 조금만 밀어도 인식되게 보정
 
   /* ── DOM 참조 ─────────────────────────────────── */
   const memberModal   = document.getElementById("member-modal");
@@ -91,7 +91,7 @@
     renderZones();
   };
 
-  /* ── 🐣 진화 계산 (옵션 A) ── */
+  /* ── 🐣 진화 계산 ── */
   function getEvolutionStr(totalEggs) {
     if (!totalEggs || totalEggs <= 0) return "";
     const chickens = Math.floor(totalEggs / 49);
@@ -146,7 +146,6 @@
     const eggsSnap = await getDoc(eggsRef);
     let currentEggs = eggsSnap.exists() ? eggsSnap.data() : { lastAwardedDate: "", retroactiveDone: false, retroactiveDone_v2: false };
 
-    // [긴급 패치] 누구나 시작은 덩그러니 달걀 1개부터!
     if (!currentEggs.retroactiveDone_v2) {
       currentEggs["미네"] = 1; 
       currentEggs["아빠"] = 1;
@@ -167,7 +166,7 @@
       }
       
       if (todayKing) {
-        currentEggs[todayKing] = (currentEggs[todayKing] || 0) + 1; // 딱 1개 지급!
+        currentEggs[todayKing] = (currentEggs[todayKing] || 0) + 1; 
         currentEggs.lastAwardedDate = todayStr;
         await setDoc(eggsRef, currentEggs);
         
@@ -490,11 +489,13 @@
     const theMoon = currentSwipeBtn.querySelector('.the-moon');
     let moveX = e.clientX - pointerStartX;
     
-    // 달이 활주로를 벗어나지 않도록 최대 이동거리 제한
-    if(moveX > 25) moveX = 25;
-    if(moveX < -25) moveX = -25;
+    // 달이 활주로를 벗어나지 않도록 최대 이동거리 제한 (버튼 크기가 줄었으니 이동폭도 조정)
+    if(moveX > 20) moveX = 20;
+    if(moveX < -20) moveX = -20;
     
-    if (theMoon) theMoon.style.transform = `translateX(${moveX}px)`;
+    if (theMoon) {
+      theMoon.style.transform = `translateX(${moveX}px)`;
+    }
   });
 
   zonesEl.addEventListener('pointerup', async (e) => {
@@ -855,7 +856,7 @@
   .zone-card.cleared { opacity: 0.8; border-color: #D5F5E3; background: #FAFAFA; }
   .sortable-ghost { opacity: 0.4; border: 2px dashed var(--blue); background: #EBF5FB; border-radius: 14px;}
 
-  .zone-main { display: flex; align-items: center; gap: 12px; }
+  .zone-main { display: flex; align-items: center; gap: 10px; }
   
   .zone-emoji { font-size: 1.8rem; flex-shrink: 0; min-width: 36px; text-align:center;}
   .done-sticker { 
@@ -892,29 +893,32 @@
   .bold { font-weight: 700; }
   .last-who { font-size: .7rem; margin-left: 4px; }
 
-  .zone-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+  /* 🌟 액션 버튼들 여백 및 크기 축소 (공간 확보) */
+  .zone-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
   
-  /* 🌟 스와이프 전용 달 버튼 디자인 */
+  /* 🌟 스와이프 전용 달 버튼 크기 축소 */
   .swipe-moon-btn {
-    width: 82px; /* 활주로 길이 */
-    height: 42px; border-radius: 20px; border: 1px solid var(--border);
+    width: 72px; /* 활주로 길이 살짝 축소 */
+    height: 36px; /* 버튼 높이 축소 */
+    border-radius: 18px; border: 1px solid var(--border);
     background: #FDFEFE; display: flex; align-items: center; justify-content: space-between;
-    padding: 0 10px; cursor: pointer; transition: transform .1s, background .15s;
+    padding: 0 8px; cursor: pointer; transition: transform .1s, background .15s;
     user-select: none;
-    touch-action: pan-y; /* 수평 스크롤 방지 & 자바스크립트에 이벤트 온전 전달 */
+    touch-action: pan-y; 
     box-shadow: inset 0 2px 4px rgba(0,0,0,0.02);
   }
   .swipe-hint {
-    font-size: 0.95rem; font-weight: 900; color: #D5D8DC; user-select: none;
+    font-size: 0.8rem; font-weight: 900; color: #D5D8DC; user-select: none;
   }
   .the-moon {
-    font-size: 1.45rem; pointer-events: none; /* 달이 이벤트를 가로채지 않게 방지 */
+    font-size: 1.3rem; pointer-events: none; 
   }
 
+  /* 🌟 메모 및 설정 버튼 크기 축소 */
   .action-btn {
-    width: 42px; height: 42px; border-radius: 10px; border: 1px solid var(--border);
+    width: 34px; height: 34px; border-radius: 8px; border: 1px solid var(--border);
     background: #F8F9F9; display: flex; align-items: center; justify-content: center;
-    font-size: 1.25rem; cursor: pointer; transition: transform .1s, background .15s;
+    font-size: 1.1rem; cursor: pointer; transition: transform .1s, background .15s;
     user-select: none;
   }
   .action-btn:active { transform: scale(0.85); background: #EAECEE; }
