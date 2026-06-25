@@ -16,15 +16,15 @@
   } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
   /* ====================================================
-     🔑 Firebase 프로젝트 설정
+     🔑 본인의 Firebase 프로젝트 설정을 아래에 입력하세요!
   ==================================================== */
   const firebaseConfig = {
-    apiKey: "AIzaSyDhFAROrgAiaqjXB-TcCLfVzwnRvdRH3yc",
-    authDomain: "homework-87845.firebaseapp.com",
-    projectId: "homework-87845",
-    storageBucket: "homework-87845.firebasestorage.app",
-    messagingSenderId: "705292024213",
-    appId: "1:705292024213:web:fb7d893c9e4993669f9e9c"
+    apiKey: "여기에_API_KEY_입력",
+    authDomain: "여기에_AUTH_DOMAIN_입력",
+    projectId: "여기에_PROJECT_ID_입력",
+    storageBucket: "여기에_STORAGE_BUCKET_입력",
+    messagingSenderId: "여기에_SENDER_ID_입력",
+    appId: "여기에_APP_ID_입력"
   };
 
   const app = initializeApp(firebaseConfig);
@@ -32,8 +32,10 @@
   const ZONES_COL = "zones";
 
   /* ── 역할 목록 및 이모지 배열 ──────────────────── */
-  const ROLES = ["아빠", "엄마", "미네"];
+  const ROLES = ["아빠", "엄마", "1호", "2호"];
   const PENALTY_EMOJIS = ["🙄","😛","😜","🤪","😶","🤨","🤔","🤫","🫣","🫩","😵‍💫","🤢","🤮","😠","😡","🤬","👿","☠️"];
+  
+  // 과학적인 8단계 달의 위상 순환
   const ALL_MOONS = ["🌑", "🌒", "🌓", "🌔", "🌝", "🌖", "🌗", "🌘"];
 
   /* ── 상태 ─────────────────────────────────────── */
@@ -43,8 +45,8 @@
   let openCommentIds = new Set();
   
   let zonesData    = [];
-  let dailyClicksData = { "아빠": 0, "엄마": 0, "미네": 0 };
-  let eggsData = { "아빠": 0, "엄마": 0, "미네": 0, lastAwardedDate: "", retroactiveDone: false };
+  let dailyClicksData = {};
+  let eggsData = { lastAwardedDate: "", retroactiveDone: false };
   
   let rouletteActive = false;
 
@@ -82,41 +84,49 @@
     renderZones();
   };
 
-  // 상단 프로필 옆에 획득한 계란(🥚) 개수 실시간 표시!
+  /* ── 🐣 진화 계산 및 뱃지 업데이트 ── */
+  function getEvolutionStr(totalEggs) {
+    if (!totalEggs || totalEggs <= 0) return "🥚 0";
+    const chickens = Math.floor(totalEggs / 49);
+    const chicks = Math.floor((totalEggs % 49) / 7);
+    const eggs = totalEggs % 7;
+    
+    let res = [];
+    if (chickens > 0) res.push(`🐔 ${chickens}`);
+    if (chicks > 0) res.push(`🐣 ${chicks}`);
+    if (eggs > 0 || (chickens === 0 && chicks === 0)) res.push(`🥚 ${eggs}`);
+    return res.join(" ");
+  }
+
   function updateMemberBadge() {
     if(currentRole && currentEmoji) {
-      let myEggs = eggsData[currentRole] || 0;
+      let myTotalEggs = eggsData[currentRole] || 0;
+      let evoStr = getEvolutionStr(myTotalEggs);
       let todayClicks = dailyClicksData[currentRole] || 0;
-      memberBadge.innerHTML = `${currentEmoji} ${currentRole} <span class="header-count">🥚 ${myEggs}개</span> <span class="header-clicks">(오늘 ${todayClicks}클릭)</span>`;
+      
+      memberBadge.innerHTML = `${currentEmoji} ${currentRole} <span class="header-count">${evoStr}</span> <span class="header-clicks">(오늘 ${todayClicks}클릭)</span>`;
     }
   }
 
   document.getElementById("change-member-btn").onclick = renderMemberModal;
 
-  /* ── 🥚 과거 데이터 전수조사 및 밤 9시 보상 시스템 ── */
+  /* ── 🥚 과거 누락 데이터 소급 및 밤 9시 1계란 보상 ── */
   async function runRetroactiveAndRewardCheck() {
     const todayStr = new Date().toISOString().split('T')[0];
-    
-    // 1. 계란 데이터 가져오기
     const eggsRef = doc(db, "stats", "eggs");
     const eggsSnap = await getDoc(eggsRef);
-    let currentEggs = eggsSnap.exists() ? eggsSnap.data() : { "아빠": 0, "엄마": 0, "미네": 0, lastAwardedDate: "", retroactiveDone: false };
+    let currentEggs = eggsSnap.exists() ? eggsSnap.data() : { lastAwardedDate: "", retroactiveDone: false };
 
-    // 2. [소급 적용] 처음 시작할 때부터의 이력을 싹 다 뒤져서 미네 계란 챙겨주기!
+    // 1. [소급 적용] 미네가 그동안 놓친 계란들을 한 번에 지급 (28알 = 병아리 4마리 분량)
     if (!currentEggs.retroactiveDone) {
-      let totalHistoryCount = 0;
-      zonesData.forEach(z => {
-        if (z.history) totalHistoryCount += z.history.length;
-      });
-      // 그동안 미네가 놓친 기여도와 날짜를 고려해 아주 넉넉하게 계란 보상 정산 (최소 28개 보장)
-      currentEggs["미네"] = Math.max(28, totalHistoryCount * 2);
+      currentEggs["미네"] = 28; // 미네의 밀린 계란 지급
       currentEggs["아빠"] = 2;
       currentEggs["엄마"] = 3;
       currentEggs.retroactiveDone = true;
       await setDoc(eggsRef, currentEggs);
     }
 
-    // 3. [밤 9시 보상 체크] 21시 이후이고, 오늘 아직 계란 지급이 안 되었다면 자동 지급!
+    // 2. [밤 9시 보상] 21시 이후 + 오늘 아직 안 줬다면 오늘의 활동왕에게 딱 1개 지급!
     const now = new Date();
     if (now.getHours() >= 21 && currentEggs.lastAwardedDate !== todayStr) {
       let maxClicks = 0;
@@ -127,15 +137,15 @@
           todayKing = role;
         }
       }
-      // 오늘 클릭 기여도가 가장 높은 사람에게 계란 보상!
+      
       if (todayKing) {
-        currentEggs[todayKing] = (currentEggs[todayKing] || 0) + 1;
+        currentEggs[todayKing] = (currentEggs[todayKing] || 0) + 1; // 딱 1개만 지급
         currentEggs.lastAwardedDate = todayStr;
         await setDoc(eggsRef, currentEggs);
         
         if (currentRole === todayKing) {
           launchConfetti("🥚");
-          alert(`🎉 [밤 9시 정각 보상] 오늘 기여도가 가장 높은 활동왕 [${todayKing}]님에게 보상 계란 🥚1개가 지급되었습니다!`);
+          alert(`🎉 [정산 완료] 오늘의 활동왕 [${todayKing}]님에게 보상 계란 🥚 1개가 지급되었습니다!`);
         }
       }
     }
@@ -143,7 +153,7 @@
     updateMemberBadge();
   }
 
-  /* ── 📊 실시간 클릭 카운트 추적 ── */
+  /* ── 📊 실시간 클릭 카운트 누적 ── */
   async function trackClickContribution() {
     if (!currentRole) return;
     const todayStr = new Date().toISOString().split('T')[0];
@@ -157,7 +167,6 @@
   }
 
   /* ── Firestore 실시간 구독 ── */
-  // 1. 항목 리스트 구독
   onSnapshot(collection(db, ZONES_COL), snap => {
     zonesData = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     zonesData.sort((a, b) => (a.order || 0) - (b.order || 0));
@@ -169,20 +178,17 @@
     syncTimeEl.innerText = `🔄 최근 동기화: ${timeStr}`;
   });
 
-  // 2. 오늘 클릭 수 구독
   onSnapshot(doc(db, "stats", "today"), d => {
     const todayStr = new Date().toISOString().split('T')[0];
     if (d.exists()) {
       const data = d.data();
-      if (data.date === todayStr) {
-        dailyClicksData = data.clicks || dailyClicksData;
-      }
+      if (data.date === todayStr) dailyClicksData = data.clicks || {};
+      else dailyClicksData = {}; // 날이 바뀌면 0으로 초기화
     }
     updateKingBanner();
     updateMemberBadge();
   });
 
-  // 3. 누적 계란 수 구독
   onSnapshot(doc(db, "stats", "eggs"), d => {
     if (d.exists()) {
       eggsData = d.data();
@@ -201,7 +207,7 @@
     return Math.floor((today - target) / 86400000);
   }
 
-  /* ── 오늘의 활동왕 배너 (클릭 수 기반으로 변경!) ── */
+  /* ── 오늘의 활동왕 배너 ────────────────────────── */
   function updateKingBanner() {
     let maxClicks = 0;
     let kingRole = null;
@@ -213,7 +219,7 @@
     }
 
     if (kingRole && maxClicks > 0) {
-      kingBanner.innerHTML = `🏆 실시간 활동왕: <strong>👑 ${kingRole}</strong> (기여도: ${maxClicks}클릭) ➔ 밤 9시 🥚 지급 대기 중!`;
+      kingBanner.innerHTML = `🏆 실시간 활동왕: <strong>👑 ${kingRole}</strong> (${maxClicks}클릭) ➔ 밤 9시 🥚 대기 중!`;
       kingBanner.classList.remove("hidden");
     } else {
       kingBanner.classList.add("hidden");
@@ -232,9 +238,7 @@
     const otherZones = zonesData.filter(z => z.assignee !== currentRole);
 
     let renderGroups = [];
-    if (myZones.length > 0) {
-      renderGroups.push({ title: "📌 내 당번 항목", zones: myZones });
-    }
+    if (myZones.length > 0) renderGroups.push({ title: "📌 내 당번 항목", zones: myZones });
 
     const categories = [...new Set(otherZones.map(z => z.category || "기타"))];
     categories.forEach(cat => {
@@ -404,7 +408,7 @@
   zonesEl.addEventListener("click", async (e) => {
     const target = e.target;
 
-    // 1. 달(진행도) 버튼 클릭 -> 기여도 클릭 카운트 무조건 누적!
+    // 1. 달(진행도) 버튼 클릭 -> 기여도 클릭 카운트 무조건 1업!
     const progBtn = target.closest(".progress-btn");
     if (progBtn) {
       e.stopPropagation();
@@ -416,7 +420,7 @@
       const nextIndex = (currentIndex + 1) % 8; 
 
       vibrateShort();
-      await trackClickContribution(); // 📊 기여도 카운트 업!
+      await trackClickContribution(); // 📊 누를 때마다 기여도 1 상승
 
       if (nextIndex === 4) {
         clearZone(id, progBtn.dataset.emoji);
@@ -470,7 +474,6 @@
       progress:    4 
     });
     launchConfetti("🌝");
-    runRetroactiveAndRewardCheck();
   }
 
   async function undoClearSilent(id, nextProgress) {
@@ -493,7 +496,6 @@
       lastWho: newLastWho,
       progress: nextProgress
     });
-    runRetroactiveAndRewardCheck();
   }
 
   async function updateComment(id, text) {
