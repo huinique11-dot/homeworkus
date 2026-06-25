@@ -86,7 +86,7 @@
     renderZones();
   };
 
-  /* ── 🐣 진화 계산 (글자 없이 이모지만 나열) ── */
+  /* ── 🐣 진화 계산 (옵션 A: 차곡차곡 합체 & 개별 태그) ── */
   function getEvolutionStr(totalEggs) {
     if (!totalEggs || totalEggs <= 0) return "";
     const chickens = Math.floor(totalEggs / 49);
@@ -94,13 +94,14 @@
     const eggs = totalEggs % 7;
     
     let res = "";
-    for(let i=0; i<chickens; i++) res += "🐔 ";
-    for(let i=0; i<chicks; i++) res += "🐣 ";
-    for(let i=0; i<eggs; i++) res += "🥚 ";
-    return res.trim(); // "🐣 🥚 🥚" 형식으로 표시
+    // 각각의 동물을 누를 수 있도록 span 태그로 감싸기
+    for(let i=0; i<chickens; i++) res += "<span class='farm-animal'>🐔</span>";
+    for(let i=0; i<chicks; i++) res += "<span class='farm-animal'>🐣</span>";
+    for(let i=0; i<eggs; i++) res += "<span class='farm-animal'>🥚</span>";
+    return res; 
   }
 
-  // 상단 바 UI (깔끔하게 복구)
+  // 상단 바 UI
   function updateMemberBadge() {
     if(currentRole && currentEmoji) {
       let todayClicks = dailyClicksData[currentRole] || 0;
@@ -123,6 +124,20 @@
 
   document.getElementById("change-member-btn").onclick = renderMemberModal;
 
+  /* ── 🥚 나만의 농장 터치 이벤트 (흔들흔들 & 진동) ── */
+  eggFarmEl.addEventListener("click", (e) => {
+    const animal = e.target.closest(".farm-animal");
+    if (animal) {
+      // 1. 아주 약한 진동 (15ms)
+      try { if (navigator.vibrate) navigator.vibrate(15); } catch(_) {}
+      
+      // 2. 흔들흔들 애니메이션 재시작을 위한 클래스 토글
+      animal.classList.remove("wobble");
+      void animal.offsetWidth; // 브라우저 리플로우 강제 발생 (애니메이션 리셋)
+      animal.classList.add("wobble");
+    }
+  });
+
   /* ── 🥚 밸런스 패치 및 밤 9시 1계란 보상 ── */
   async function runRetroactiveAndRewardCheck() {
     const todayStr = new Date().toISOString().split('T')[0];
@@ -130,8 +145,7 @@
     const eggsSnap = await getDoc(eggsRef);
     let currentEggs = eggsSnap.exists() ? eggsSnap.data() : { lastAwardedDate: "", retroactiveDone: false, retroactiveDone_v2: false };
 
-    // 1. [긴급 패치] 어제 제가 28개씩 퍼줬던 오류를 바로잡습니다. 
-    // 누구나 시작은 덩그러니 달걀 1개부터!
+    // [긴급 패치] 누구나 시작은 덩그러니 달걀 1개부터!
     if (!currentEggs.retroactiveDone_v2) {
       currentEggs["미네"] = 1; 
       currentEggs["아빠"] = 1;
@@ -140,7 +154,7 @@
       await setDoc(eggsRef, currentEggs);
     }
 
-    // 2. [밤 9시 보상] 21시 이후 + 오늘 아직 안 줬다면 오늘의 활동왕에게 딱 1개 지급!
+    // [밤 9시 보상] 21시 이후 + 오늘 아직 안 줬다면 오늘의 활동왕에게 딱 1개 지급!
     const now = new Date();
     if (now.getHours() >= 21 && currentEggs.lastAwardedDate !== todayStr) {
       let maxClicks = 0;
@@ -857,16 +871,36 @@
   .empty-state { text-align: center; padding: 60px 20px; color: var(--sub); }
   .empty-icon { font-size: 3.5rem; display: block; margin-bottom: 16px; }
 
-  /* ── 🌾 나만의 농장 (맨 아래 표시) ─────────────────────── */
+  /* ── 🌾 나만의 농장 (맨 아래 표시) 및 흔들흔들 애니메이션 ── */
   .egg-farm {
     text-align: center;
     padding: 20px;
     margin-top: 10px;
     margin-bottom: 10px;
-    font-size: 1.8rem;
-    letter-spacing: 4px;
+    font-size: 2rem;
     user-select: none;
     min-height: 40px;
+    display: flex;
+    justify-content: center;
+    gap: 8px; /* 동물들 사이 간격 */
+    flex-wrap: wrap;
+  }
+  
+  .farm-animal {
+    display: inline-block;
+    cursor: pointer;
+    transition: transform 0.1s;
+  }
+  
+  .farm-animal.wobble {
+    animation: wobbleAnim 0.4s ease-in-out;
+  }
+  
+  @keyframes wobbleAnim {
+    0%, 100% { transform: rotate(0deg) scale(1); }
+    25% { transform: rotate(-15deg) scale(1.1); }
+    50% { transform: rotate(15deg) scale(1.1); }
+    75% { transform: rotate(-15deg) scale(1.1); }
   }
 
   /* ── 🔄 동기화 시간 표시 ─────────────────────── */
