@@ -16,15 +16,15 @@
   } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
   /* ====================================================
-     🔑 본인의 Firebase 프로젝트 설정을 아래에 입력하세요!
+     🔑 본인의 Firebase 프로젝트 설정
   ==================================================== */
   const firebaseConfig = {
-    apiKey: "여기에_API_KEY_입력",
-    authDomain: "여기에_AUTH_DOMAIN_입력",
-    projectId: "여기에_PROJECT_ID_입력",
-    storageBucket: "여기에_STORAGE_BUCKET_입력",
-    messagingSenderId: "여기에_SENDER_ID_입력",
-    appId: "여기에_APP_ID_입력"
+    apiKey: "AIzaSyDhFAROrgAiaqjXB-TcCLfVzwnRvdRH3yc",
+    authDomain: "homework-87845.firebaseapp.com",
+    projectId: "homework-87845",
+    storageBucket: "homework-87845.firebasestorage.app",
+    messagingSenderId: "705292024213",
+    appId: "1:705292024213:web:fb7d893c9e4993669f9e9c"
   };
 
   const app = initializeApp(firebaseConfig);
@@ -32,7 +32,7 @@
   const ZONES_COL = "zones";
 
   /* ── 역할 목록 및 이모지 배열 ──────────────────── */
-  const ROLES = ["아빠", "엄마", "1호", "2호"];
+  const ROLES = ["아빠", "엄마", "미네"];
   const PENALTY_EMOJIS = ["🙄","😛","😜","🤪","😶","🤨","🤔","🤫","🫣","🫩","😵‍💫","🤢","🤮","😠","😡","🤬","👿","☠️"];
   
   // 과학적인 8단계 달의 위상 순환
@@ -119,9 +119,9 @@
 
     // 1. [소급 적용] 미네가 그동안 놓친 계란들을 한 번에 지급 (28알 = 병아리 4마리 분량)
     if (!currentEggs.retroactiveDone) {
-      currentEggs["미네"] = 28; // 미네의 밀린 계란 지급
-      currentEggs["아빠"] = 2;
-      currentEggs["엄마"] = 3;
+      currentEggs["미네"] = (currentEggs["미네"] || 0) + 28; // 미네의 밀린 계란 지급
+      currentEggs["아빠"] = (currentEggs["아빠"] || 0) + 2;
+      currentEggs["엄마"] = (currentEggs["엄마"] || 0) + 3;
       currentEggs.retroactiveDone = true;
       await setDoc(eggsRef, currentEggs);
     }
@@ -145,7 +145,7 @@
         
         if (currentRole === todayKing) {
           launchConfetti("🥚");
-          alert(`🎉 [정산 완료] 오늘의 활동왕 [${todayKing}]님에게 보상 계란 🥚 1개가 지급되었습니다!`);
+          alert(`🎉 [정산 완료] 오늘의 활동왕 [${todayKing}]님에게 보상 달걀 🥚 1개가 지급되었습니다!`);
         }
       }
     }
@@ -408,7 +408,7 @@
   zonesEl.addEventListener("click", async (e) => {
     const target = e.target;
 
-    // 1. 달(진행도) 버튼 클릭 -> 기여도 클릭 카운트 무조건 1업!
+    // 1. 달(진행도) 버튼 클릭 -> 기여도 클릭 카운트 1 상승
     const progBtn = target.closest(".progress-btn");
     if (progBtn) {
       e.stopPropagation();
@@ -420,7 +420,7 @@
       const nextIndex = (currentIndex + 1) % 8; 
 
       vibrateShort();
-      await trackClickContribution(); // 📊 누를 때마다 기여도 1 상승
+      await trackClickContribution(); // 📊 누를 때마다 기여도 반영
 
       if (nextIndex === 4) {
         clearZone(id, progBtn.dataset.emoji);
