@@ -50,6 +50,10 @@
   
   let rouletteActive = false;
 
+  // 더블 탭 판정을 위한 타이머 변수
+  let moonClickTimer = null;
+  let lastMoonClickedId = null;
+
   /* ── DOM 참조 ─────────────────────────────────── */
   const memberModal   = document.getElementById("member-modal");
   const roleSelect    = document.getElementById("inp-role");
@@ -61,7 +65,7 @@
   const rouletteBtn   = document.getElementById("roulette-btn");
   const rouletteCard  = document.getElementById("roulette-card");
   const zonesEl       = document.getElementById("zones");
-  const eggFarmEl     = document.getElementById("egg-farm"); // 맨 밑의 나만의 농장
+  const eggFarmEl     = document.getElementById("egg-farm"); 
   const addModal      = document.getElementById("add-modal");
   const addForm       = document.getElementById("add-form");
   const fab           = document.getElementById("fab");
@@ -86,7 +90,7 @@
     renderZones();
   };
 
-  /* ── 🐣 진화 계산 (옵션 A: 차곡차곡 합체 & 개별 태그) ── */
+  /* ── 🐣 진화 계산 (옵션 A) ── */
   function getEvolutionStr(totalEggs) {
     if (!totalEggs || totalEggs <= 0) return "";
     const chickens = Math.floor(totalEggs / 49);
@@ -94,7 +98,6 @@
     const eggs = totalEggs % 7;
     
     let res = "";
-    // 각각의 동물을 누를 수 있도록 span 태그로 감싸기
     for(let i=0; i<chickens; i++) res += "<span class='farm-animal'>🐔</span>";
     for(let i=0; i<chicks; i++) res += "<span class='farm-animal'>🐣</span>";
     for(let i=0; i<eggs; i++) res += "<span class='farm-animal'>🥚</span>";
@@ -128,12 +131,9 @@
   eggFarmEl.addEventListener("click", (e) => {
     const animal = e.target.closest(".farm-animal");
     if (animal) {
-      // 1. 아주 약한 진동 (15ms)
       try { if (navigator.vibrate) navigator.vibrate(15); } catch(_) {}
-      
-      // 2. 흔들흔들 애니메이션 재시작을 위한 클래스 토글
       animal.classList.remove("wobble");
-      void animal.offsetWidth; // 브라우저 리플로우 강제 발생 (애니메이션 리셋)
+      void animal.offsetWidth; 
       animal.classList.add("wobble");
     }
   });
@@ -145,7 +145,6 @@
     const eggsSnap = await getDoc(eggsRef);
     let currentEggs = eggsSnap.exists() ? eggsSnap.data() : { lastAwardedDate: "", retroactiveDone: false, retroactiveDone_v2: false };
 
-    // [긴급 패치] 누구나 시작은 덩그러니 달걀 1개부터!
     if (!currentEggs.retroactiveDone_v2) {
       currentEggs["미네"] = 1; 
       currentEggs["아빠"] = 1;
@@ -154,7 +153,6 @@
       await setDoc(eggsRef, currentEggs);
     }
 
-    // [밤 9시 보상] 21시 이후 + 오늘 아직 안 줬다면 오늘의 활동왕에게 딱 1개 지급!
     const now = new Date();
     if (now.getHours() >= 21 && currentEggs.lastAwardedDate !== todayStr) {
       let maxClicks = 0;
@@ -167,7 +165,7 @@
       }
       
       if (todayKing) {
-        currentEggs[todayKing] = (currentEggs[todayKing] || 0) + 1; // 하루에 딱 1개만 지급!
+        currentEggs[todayKing] = (currentEggs[todayKing] || 0) + 1; 
         currentEggs.lastAwardedDate = todayStr;
         await setDoc(eggsRef, currentEggs);
         
@@ -182,12 +180,13 @@
     updateEggFarm();
   }
 
-  /* ── 📊 실시간 클릭 카운트 누적 ── */
-  async function trackClickContribution() {
+  /* ── 📊 실시간 클릭 카운트 수정 (더블 탭 취소 대응을 위해 양수/음수 조절 가능하도록 변경) ── */
+  async function trackClickContribution(amount) {
     if (!currentRole) return;
     const todayStr = new Date().toISOString().split('T')[0];
     let updatedClicks = { ...dailyClicksData };
-    updatedClicks[currentRole] = (updatedClicks[currentRole] || 0) + 1;
+    // 기여도가 음수로 떨어지지 않도록 보정
+    updatedClicks[currentRole] = Math.max(0, (updatedClicks[currentRole] || 0) + amount);
     
     await setDoc(doc(db, "stats", "today"), {
       date: todayStr,
@@ -212,7 +211,7 @@
     if (d.exists()) {
       const data = d.data();
       if (data.date === todayStr) dailyClicksData = data.clicks || {};
-      else dailyClicksData = {}; // 날이 바뀌면 0으로 초기화
+      else dailyClicksData = {}; 
     }
     updateKingBanner();
     updateMemberBadge();
@@ -434,30 +433,37 @@
     }
   }
 
-  /* ── 🌟 통합 이벤트 위임 ── */
+  /* ── 🌟 통합 이벤트 위임 (싱글탭 vs 더블탭 분기 로직 적용) ── */
   zonesEl.addEventListener("click", async (e) => {
     const target = e.target;
 
-    // 1. 달(진행도) 버튼 클릭 -> 기여도 클릭 카운트 1 상승
+    // 1. 달(진행도) 버튼 제어
     const progBtn = target.closest(".progress-btn");
     if (progBtn) {
       e.stopPropagation();
       const id = progBtn.dataset.id;
       const currentDisplayMoon = progBtn.dataset.moon; 
-      let currentIndex = ALL_MOONS.indexOf(currentDisplayMoon);
-      if (currentIndex === -1) currentIndex = 0;
-      
-      const nextIndex = (currentIndex + 1) % 8; 
+      const emoji = progBtn.dataset.emoji;
 
-      vibrateShort();
-      await trackClickContribution(); // 📊 누를 때마다 기여도 반영
-
-      if (nextIndex === 4) {
-        clearZone(id, progBtn.dataset.emoji);
-      } else if (currentIndex === 4) {
-        undoClearSilent(id, nextIndex);
+      // 더블 탭 판정 시스템 (220ms 내에 재클릭 시 취소 모드로 동작)
+      if (moonClickTimer && lastMoonClickedId === id) {
+        clearTimeout(moonClickTimer);
+        moonClickTimer = null;
+        lastMoonClickedId = null;
+        
+        // 🔄 더블 탭: 뒤로 한 칸 가고 기여도 점수 -1 차감!
+        await handleMoonDecrease(id, currentDisplayMoon, emoji);
       } else {
-        updateDoc(doc(db, ZONES_COL, id), { progress: nextIndex });
+        if (moonClickTimer) clearTimeout(moonClickTimer);
+        lastMoonClickedId = id;
+        
+        moonClickTimer = setTimeout(async () => {
+          moonClickTimer = null;
+          lastMoonClickedId = null;
+          
+          // ➔ 싱글 탭: 앞으로 한 칸 가고 기여도 점수 +1 추가!
+          await handleMoonIncrease(id, currentDisplayMoon, emoji);
+        }, 220); 
       }
       return;
     }
@@ -486,6 +492,46 @@
       return;
     }
   });
+
+  /* ── 🌕 달 제어 처리 상세 스크립트 ── */
+  // 앞으로 차오르기 (기존 로직 유지)
+  async function handleMoonIncrease(id, currentDisplayMoon, emoji) {
+    let currentIndex = ALL_MOONS.indexOf(currentDisplayMoon);
+    if (currentIndex === -1) currentIndex = 0;
+    const nextIndex = (currentIndex + 1) % 8; 
+
+    try { if (navigator.vibrate) navigator.vibrate(15); } catch(_) {}
+    await trackClickContribution(1); // 오늘 기여도 +1
+
+    if (nextIndex === 4) {
+      clearZone(id, emoji);
+    } else if (currentIndex === 4) {
+      undoClearSilent(id, nextIndex);
+    } else {
+      await updateDoc(doc(db, ZONES_COL, id), { progress: nextIndex });
+    }
+  }
+
+  // 🔄 더블탭으로 뒤로 리와인드 (취소 기능)
+  async function handleMoonDecrease(id, currentDisplayMoon, emoji) {
+    let currentIndex = ALL_MOONS.indexOf(currentDisplayMoon);
+    if (currentIndex === -1) currentIndex = 0;
+    const prevIndex = (currentIndex - 1 + 8) % 8; 
+
+    // 취소할 때는 조금 더 긴 진동 피드백
+    try { if (navigator.vibrate) navigator.vibrate(35); } catch(_) {}
+    await trackClickContribution(-1); // 오늘 기여도 -1 차감!
+
+    if (currentIndex === 4) {
+      // 🌝 보름달 완료 상태에서 취소하면 -> 완료 기록 지우고 🌔(3)으로 복구
+      undoClearSilent(id, 3);
+    } else if (currentIndex === 5) {
+      //  Skipping 수습: 🌖에서 뒤로가면 다시 🌝 완료 상태로 재결합
+      clearZone(id, emoji);
+    } else {
+      await updateDoc(doc(db, ZONES_COL, id), { progress: prevIndex });
+    }
+  }
 
   zonesEl.addEventListener("change", (e) => {
     if (e.target.classList.contains("comment-input")) {
@@ -699,7 +745,7 @@
     overflow-x: hidden;
   }
 
-  /* ── Header (깔끔하게 원래대로 복구) ── */
+  /* ── Header ── */
   header {
     background: #fff;
     padding: 16px 20px;
@@ -788,7 +834,6 @@
 
   .zone-main { display: flex; align-items: center; gap: 12px; }
   
-  /* 🌟 이모지 및 반짝이 위치 */
   .zone-emoji { font-size: 1.8rem; flex-shrink: 0; min-width: 36px; text-align:center;}
   .done-sticker { 
     display: inline-block; 
@@ -824,7 +869,6 @@
   .bold { font-weight: 700; }
   .last-who { font-size: .7rem; margin-left: 4px; }
 
-  /* 컴팩트 액션 버튼들 */
   .zone-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
   
   .action-btn {
@@ -837,7 +881,6 @@
   
   .progress-btn { background: #fff; font-size: 1.5rem; } 
   
-  /* 코멘트 알림 뱃지 */
   .memo-btn { position: relative; }
   .memo-btn.has-memo::after {
     content: ""; position: absolute; top: -2px; right: -2px;
@@ -847,7 +890,6 @@
   
   .edit-btn { background: transparent; border: none; opacity: 0.6; }
 
-  /* 코멘트 영역 스타일 */
   .zone-comments {
     margin-top: 14px; background: #F8F9F9; border-radius: 10px;
     padding: 12px; border: 1px solid #EAECEE;
@@ -867,11 +909,10 @@
   }
   .comment-input:focus { border-color: var(--blue); }
 
-  /* ── Empty State ─────────────────────────────── */
   .empty-state { text-align: center; padding: 60px 20px; color: var(--sub); }
   .empty-icon { font-size: 3.5rem; display: block; margin-bottom: 16px; }
 
-  /* ── 🌾 나만의 농장 (맨 아래 표시) 및 흔들흔들 애니메이션 ── */
+  /* ── 🌾 나만의 농장 (흔들흔들 애니메이션 세팅) ── */
   .egg-farm {
     text-align: center;
     padding: 20px;
@@ -882,7 +923,7 @@
     min-height: 40px;
     display: flex;
     justify-content: center;
-    gap: 8px; /* 동물들 사이 간격 */
+    gap: 8px; 
     flex-wrap: wrap;
   }
   
@@ -903,7 +944,7 @@
     75% { transform: rotate(-15deg) scale(1.1); }
   }
 
-  /* ── 🔄 동기화 시간 표시 ─────────────────────── */
+  /* ── 🔄 동기화 시간 표시 ── */
   .sync-time {
     text-align: center;
     font-size: 0.75rem;
@@ -912,7 +953,7 @@
     font-weight: 600;
   }
 
-  /* ── FAB ──────────────────────────────────────── */
+  /* ── FAB ── */
   #fab {
     position: fixed; bottom: 24px; right: calc(50% - 220px);
     width: 60px; height: 60px; border-radius: 50%; background: var(--blue);
@@ -923,7 +964,7 @@
   #fab:active { transform: scale(0.9); }
   @media (max-width: 480px) { #fab { right: 20px; } }
 
-  /* ── Modal Base ── */
+  /* ── Modal ── */
   .modal-overlay {
     position: fixed; inset: 0; background: rgba(17, 24, 39, 0.4); backdrop-filter: blur(4px);
     display: flex; align-items: flex-end; justify-content: center; z-index: 100;
@@ -940,7 +981,6 @@
   @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
   .modal-title { font-size: 1.25rem; font-weight: 800; margin-bottom: 24px; text-align: center; color: #1F2937; }
 
-  /* ── Forms ── */
   .form-group { margin-bottom: 16px; display: flex; flex-direction: column; gap: 6px; }
   .form-row { display: flex; gap: 12px; }
   .form-row .form-group { flex: 1; margin-bottom: 0; }
@@ -973,7 +1013,6 @@
     background: none; border: none; cursor: pointer; text-decoration: underline; padding: 8px;
   }
 
-  /* ── Confetti ─────────────────────────────────── */
   #confetti-layer { position: fixed; inset: 0; pointer-events: none; z-index: 199; overflow: hidden; }
   .confetti-piece { position: absolute; bottom: -20px; animation: rise 1.4s ease-out forwards; }
   @keyframes rise {
