@@ -468,7 +468,7 @@
     }
   });
 
-  /* ── 🌟 대망의 스와이프 제어 로직 ── */
+  /* ── 🌟 대망의 스와이프 제어 로직 (방향에 따른 명확한 위상 변화 매핑) ── */
   zonesEl.addEventListener('pointerdown', (e) => {
     const btn = e.target.closest('.swipe-moon-btn');
     if (btn) {
@@ -517,30 +517,34 @@
       if (currentIndex === -1) currentIndex = 0;
 
       if (deltaX > 0) {
-        // 👉 오른쪽으로 스와이프 (플러스, 차오름)
-        const nextIndex = (currentIndex + 1) % 8; 
+        // 👉 오른쪽 스와이프 (+) : 무조건 달이 차오르는 방향
+        const plusMap = {0:1, 1:2, 2:3, 3:4, 4:4, 5:4, 6:3, 7:2};
+        const nextIndex = plusMap[currentIndex];
+        
+        if (currentIndex === 4) return; // 이미 보름달(완료)이면 반응 없음
+
         vibrateShort();
-        await trackClickContribution(1); 
+        await trackClickContribution(1); // 기여도 +1 상승
 
         if (nextIndex === 4) {
           clearZone(id, emoji);
-        } else if (currentIndex === 4) {
-          undoClearSilent(id, nextIndex);
         } else {
           updateDoc(doc(db, ZONES_COL, id), { progress: nextIndex });
         }
       } else {
-        // 👈 왼쪽으로 스와이프 (마이너스, 되감기)
-        const prevIndex = (currentIndex - 1 + 8) % 8; 
-        try { if (navigator.vibrate) navigator.vibrate(35); } catch(_) {} 
-        await trackClickContribution(-1); 
+        // 👈 왼쪽 스와이프 (-) : 무조건 달이 지거나 취소되는 방향
+        const minusMap = {0:0, 1:0, 2:1, 3:2, 4:3, 5:6, 6:7, 7:0};
+        const nextIndex = minusMap[currentIndex];
+        
+        if (currentIndex === 0) return; // 이미 신월(🌑)이면 반응 없음
+
+        try { if (navigator.vibrate) navigator.vibrate(35); } catch(_) {} // 차감 시 약간 더 강한 진동 피드백
+        await trackClickContribution(-1); // 기여도 -1 차감
 
         if (currentIndex === 4) {
-          undoClearSilent(id, 3);
-        } else if (currentIndex === 5) {
-          clearZone(id, emoji);
+          undoClearSilent(id, 3); // 보름달에서 왼쪽으로 밀면 완료 기록을 지우고 🌔(3단계)로 복구
         } else {
-          updateDoc(doc(db, ZONES_COL, id), { progress: prevIndex });
+          updateDoc(doc(db, ZONES_COL, id), { progress: nextIndex });
         }
       }
     }
@@ -757,7 +761,7 @@
     min-height: 100dvh;
     max-width: 480px;
     margin: 0 auto;
-    padding-bottom: 40px; /* 불필요 여백 압축 */
+    padding-bottom: 40px; 
     overflow-x: hidden;
   }
 
@@ -949,7 +953,7 @@
   /* ── 🌾 오직 비밀 농장만 덩그러니 남은 하단 디자인 ── */
   .egg-farm {
     text-align: center;
-    padding: 30px 20px 50px; /* 아래 여백을 줘서 폰 하단바에 안 가리게 처리 */
+    padding: 30px 20px 50px; 
     margin-top: 20px;
     font-size: 2.2rem;
     user-select: none;
@@ -988,7 +992,7 @@
   #fab:active { transform: scale(0.9); }
   @media (max-width: 480px) { #fab { right: 20px; } }
 
-  /* ── Modal ── */
+  /* ── Modal (입력창 삐져나감 100% 해결 방어코드 추가) ── */
   .modal-overlay {
     position: fixed; inset: 0; background: rgba(17, 24, 39, 0.4); backdrop-filter: blur(4px);
     display: flex; align-items: flex-end; justify-content: center; z-index: 100;
@@ -1007,9 +1011,12 @@
 
   .form-group { margin-bottom: 16px; display: flex; flex-direction: column; gap: 6px; }
   .form-row { display: flex; gap: 12px; }
-  .form-row .form-group { flex: 1; margin-bottom: 0; }
+  .form-row .form-group { flex: 1; margin-bottom: 0; min-width: 0; /* Flexbox 폭주 방지 */ }
   .form-group label { font-size: .85rem; font-weight: 700; color: #4B5563; }
+  
   .form-group input, .form-group select {
+    width: 100%; /* 창 밖으로 삐져나감 방지 */
+    box-sizing: border-box; /* 패딩 포함 계산 */
     padding: 14px 16px; border-radius: 12px; border: 1.5px solid transparent;
     font-size: 1rem; outline: none; background: #F3F4F6; color: #1F2937;
     transition: all 0.2s; font-family: inherit;
